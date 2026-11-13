@@ -1,6 +1,6 @@
 {
   "name": "create-repo",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Create demo GitHub repos for Snyk testing. Default: 2 Go repos (snyk-demo-go-N), one with cross-org go.mod deps on deps-01 and one with public deps only, each with a CI workflow calling brightsheets/reusable-workflows. Also copies of Snyk's nodejs-goof / java-goof. Plans first and creates nothing until you approve.",
   "author": {
     "name": "Lovelyn Chinenye"

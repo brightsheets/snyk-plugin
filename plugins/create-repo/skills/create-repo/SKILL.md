@@ -21,7 +21,8 @@ allowed-tools: >-
     Without it, go.mod still lists every require and go.sum is left out.
 
   WHAT IT CHANGES (only after you approve)
-  - Go: seeds deps-01 with a small Go package and tag v0.1.0, only if it is
+  - Go: creates deps-01 if it's missing, and seeds it with a small Go package
+  and tag v0.1.0 if it's missing or empty.
     empty. Creates snyk-demo-go-N repos, pushes them and tags v0.1.0.
   - Node/Java: creates snyk-demo-node-N / snyk-demo-java-N, each holding the
     latest code of snyk-labs/nodejs-goof or snyk-labs/java-goof.
@@ -50,7 +51,7 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 - **CI caller:** every Go repo gets `.github/workflows/ci.yml`, which calls `brightsheets/reusable-workflows/.github/workflows/go-ci.yaml@v1` (lint, tests, Snyk). Repos with cross-org deps also pass `go-private-owners` and the `GO_MODULES_TOKEN` secret. Without a `SNYK_TOKEN` secret the Snyk scan is skipped with a warning; without `GO_MODULES_TOKEN`, repos with cross-org deps can't download their private modules, so lint and tests fail until it's set. To add the caller to Go repos made before this, run `python3 scripts/make_repos.py add-caller <repos…>` (dry run) and then add `--apply`.
 - **Numbering:** numbers continue after the highest existing one (if `snyk-demo-go-5` exists, the next run starts at 6), so names never clash. A name the user gives that already exists stops the run.
 - **Copies, not forks:** GitHub allows only one fork of a repo per account, and forks of public repos can't be private.
-- **`deps-01`:** for Go, if `deps-01` is empty it is seeded first with a small Go package and tag `v0.1.0`.
+- **`deps-01`:** for Go, if `deps-01` is missing it is created (public), and if it is missing or empty it is seeded with a small Go package and tag `v0.1.0`.
 
 ## Options (rarely needed)
 
@@ -59,7 +60,7 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 | `--public` | New repos are public. Default private. |
 | `--owner` | GitHub user or org. Default `brightsheets`. |
 | `--prefix` | Name prefix for numbered repos. Default `snyk-demo-<lang>`. |
-| `--deps` | Go: shared module repo. Default `deps-01`. |
+| `--deps` | Go: shared module repo. Default `deps-01`. Created (public) and seeded if missing. |
 | `--dry-run` | Show the plan only. |
 
 ## Steps
