@@ -186,12 +186,15 @@ def check_admin_token(owner):
     setter = f"bash {SET_TOKEN} GH_APP_ADMIN_TOKEN"
     token = os.environ.get("GH_APP_ADMIN_TOKEN")
     if not token:
+        extra = "" if user else "; Configure SSO -> Authorize for the org if it uses SSO"
         report("app", False, f"GH_APP_ADMIN_TOKEN isn't set, so the plugin can't add repos to the Snyk app for {owner} "
                "(PR checks and fix PRs need each repo in the app).",
-               f"1. Create {who} with the {' + '.join(scopes_needed)} scope(s): {create}\n"
-               f"2. In your own terminal (not in the chat), run:\n     {setter}\n"
-               "   It asks for the token with hidden input and saves it to ~/.claude/settings.json.\n"
-               "3. Restart Claude Code, then run /snyk-onboard again.", blocking=False)
+               f"Token: classic (ghp_...), {who}, scope(s) {' + '.join(scopes_needed)} only, short expiry (7-30 days){extra}.\n"
+               f"  Create: {create}\n"
+               "Export it in your terminal, then start Claude Code from that same terminal:\n"
+               "  read -rs -p \"GH_APP_ADMIN_TOKEN: \" GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN\n"
+               "  claude --continue\n"
+               f"(Or save it to ~/.claude/settings.json instead: {setter})", blocking=False)
         return
     import urllib.request, urllib.error
     req = urllib.request.Request("https://api.github.com/user", headers={

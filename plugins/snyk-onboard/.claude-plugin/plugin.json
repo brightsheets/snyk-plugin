@@ -1,6 +1,6 @@
 {
   "name": "snyk-onboard",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Onboard a GitHub repo or a whole org to Snyk: detect each repo's tech stack, pick the Snyk products that fit (Open Source, Code, Container, IaC), import the repos into a Snyk org and open a PR per repo with a .snyk policy and a stack-specific GitHub Actions workflow; checks for the Snyk MCP server and asks before installing it. Plans first and writes nothing until you approve. Supports --dry-run.",
   "author": {
     "name": "Lovelyn Chinenye"
