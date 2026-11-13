@@ -16,8 +16,10 @@ Never overwrites, deletes or force-pushes. A repo that already exists is reused 
 by this script (it has the fixture marker and the tag) and otherwise stops the run.
 
 Usage:
-  make_go_repos.py plan   [--count 10] [--owner brightsheets] [--deps deps-01] [--public]
-  make_go_repos.py create [same options] --apply
+  make_go_repos.py plan   5                      # 5 new repos, free names picked automatically
+  make_go_repos.py plan   payments orders        # these names, deps added automatically
+  make_go_repos.py create <same> --apply         # actually create
+  options: [--public] [--owner brightsheets] [--deps deps-01] [--prefix go-lib] [--standalone NAME]
   make_go_repos.py list   [--owner brightsheets]          # fixture repos already on GitHub
 
 Needs: gh CLI signed in with the `repo` scope, git. Optional: go (writes go.sum via `go mod tidy`;
@@ -160,8 +162,6 @@ def standalone_files(owner, name):
 # ---------- planning ----------
 
 def build_plan(a):
-    if a.count < 1 or a.count > MAX_COUNT:
-        sys.exit(f"--count must be 1..{MAX_COUNT}")
     owner = a.owner
     deps_mod = f"github.com/{owner}/{a.deps}"
     plan = {"owner": owner, "visibility": "public" if a.public else "private", "version": a.version, "repos": []}
@@ -184,14 +184,14 @@ def build_plan(a):
         plan["repos"].append({"name": a.deps, "kind": "deps", "action": "reuse", "version": deps_ver})
     plan["deps"] = {"module": deps_mod, "version": deps_ver, "calls_greet": deps_callable}
 
-    width = max(2, len(str(a.count)))
-    libs = [f"{a.prefix}-{i:0{width}d}" for i in range(1, a.count + 1)]
+    libs, standalone = pick_names(a, owner)
     for i, name in enumerate(libs):
         prev = libs[max(0, i - 2):i][::-1]
         plan["repos"].append({"name": name, "kind": "lib", "requires": [a.deps] + prev,
                               "files": lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, a.version)})
-    plan["repos"].append({"name": a.standalone, "kind": "standalone", "requires": [],
-                          "files": standalone_files(owner, a.standalone)})
+    if standalone:
+        plan["repos"].append({"name": standalone, "kind": "standalone", "requires": [],
+                              "files": standalone_files(owner, standalone)})
 
     for r in plan["repos"]:
         if r["kind"] == "deps":
@@ -202,9 +202,51 @@ def build_plan(a):
         elif st["marker"] and a.version in st["tags"]:
             r["action"] = "reuse"
         else:
-            sys.exit(f"{owner}/{r['name']} already exists and wasn't made by this script (or lacks tag {a.version}). "
-                     "Pick another --prefix / --standalone name, or remove that repo yourself.")
+            sys.exit(f"{owner}/{r['name']} already exists and wasn't made by this script. "
+                     "Pick another name, or just give a number to get free names automatically.")
     return plan
+
+
+def existing_names(owner):
+    r = run(["gh", "repo", "list", owner, "--limit", "4000", "--json", "name", "-q", ".[].name"])
+    return set(r.stdout.split())
+
+
+def pick_names(a, owner):
+    """Return (libs, standalone).
+
+    A number N (default 5): N new repos with free names. N-1 libs with cross deps, numbered after
+    the highest existing <prefix>-NN, plus one standalone repo with no deps (N=1: one lib).
+    Names: those repos, each with cross deps; --standalone NAME adds one with no deps.
+    """
+    names = [x.strip() for item in a.items for x in item.split(",") if x.strip()]
+    if len(names) == 1 and names[0].isdigit():
+        a.count, names = int(names[0]), []
+    if names:
+        if any(n.isdigit() for n in names):
+            sys.exit("Give either a number or repo names, not both.")
+        bad = [n for n in names if not re.match(r"^[A-Za-z0-9._-]+$", n) or n == a.deps]
+        if bad:
+            sys.exit(f"Not valid new repo names: {bad}")
+        if len(set(names)) != len(names) or a.standalone in names:
+            sys.exit("Repo names must be different from each other.")
+        return names, a.standalone
+
+    total = a.count or 5
+    if total < 1 or total > MAX_COUNT:
+        sys.exit(f"Number of repos must be 1..{MAX_COUNT}")
+    have = existing_names(owner)
+    pat = re.compile(rf"^{re.escape(a.prefix)}-(\d+)$")
+    start = max([int(m.group(1)) for n in have if (m := pat.match(n))] + [0]) + 1
+    nlibs = total - 1 if total > 1 else 1
+    libs = [f"{a.prefix}-{i:02d}" for i in range(start, start + nlibs)]
+    standalone = None
+    if total > 1:
+        base = a.standalone or "go-standalone"
+        standalone, k = base, 2
+        while standalone in have:
+            standalone, k = f"{base}-{k:02d}", k + 1
+    return libs, standalone
 
 
 def print_plan(plan):
@@ -285,9 +327,10 @@ def main():
         p = sub.add_parser(name)
         p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
         p.add_argument("--deps", default="deps-01", help="shared module repo (default deps-01)")
-        p.add_argument("--count", type=int, default=10, help=f"number of cross-dependent libs, 1..{MAX_COUNT}")
-        p.add_argument("--prefix", default="go-lib", help="lib repo name prefix (default go-lib)")
-        p.add_argument("--standalone", default="go-standalone", help="name of the repo with no deps")
+        p.add_argument("items", nargs="*", help="a number of repos (default 5), or repo names")
+        p.add_argument("--count", type=int, help=f"number of repos, 1..{MAX_COUNT} (same as giving a number)")
+        p.add_argument("--prefix", default="go-lib", help="name prefix for numbered repos (default go-lib)")
+        p.add_argument("--standalone", help="name of the repo with no deps (default: next free go-standalone)")
         p.add_argument("--version", default="v0.1.0", help="tag for new repos (default v0.1.0)")
         p.add_argument("--public", action="store_true", help="make new repos public (default private)")
         p.add_argument("--delay", type=float, default=2.0, help="seconds between repos (default 2)")
