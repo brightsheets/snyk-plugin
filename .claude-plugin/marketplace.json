@@ -12,6 +12,15 @@
         "name": "Lovelyn Chinenye"
       },
       "category": "security"
+    },
+    {
+      "name": "go-deps-fixtures",
+      "description": "Create GitHub repos whose go.mod files depend on a shared module (deps-01) and on each other, plus one repo with no dependencies. Useful for testing Go dependency scanning such as Snyk. Plans first and creates nothing until you approve. Supports --dry-run.",
+      "source": "./plugins/go-deps-fixtures",
+      "author": {
+        "name": "Lovelyn Chinenye"
+      },
+      "category": "development"
     }
   ]
 }
