@@ -58,7 +58,7 @@ allowed-tools: >-
 
 # Onboard repos to Snyk
 
-**Usage:** `/snyk-onboard <repo> [repo ...] [--dry-run]`, e.g. `/snyk-onboard go-lib-01 go-lib-02 --dry-run`, or from a file: `/snyk-onboard --file repos.txt --dry-run`. A bare repo name means `brightsheets/<name>`.
+**Usage:** `/snyk-onboard <repo> [repo ...] [--dry-run]`, e.g. `/snyk-onboard snyk-demo-go-1 snyk-demo-go-2 --dry-run`, or from a file: `/snyk-onboard --file repos.txt --dry-run`. A bare repo name means `brightsheets/<name>`.
 
 If no arguments were given, reply with that usage line and the arguments table below, then stop.
 

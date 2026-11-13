@@ -1,10 +1,18 @@
 {
   "name": "create-repo",
-  "version": "0.2.0",
-  "description": "Create GitHub repos whose go.mod files depend on a shared module (deps-01) and on each other, plus one repo with no dependencies. Useful for testing Go dependency scanning such as Snyk. Plans first and creates nothing until you approve. Supports --dry-run.",
+  "version": "0.3.0",
+  "description": "Create demo GitHub repos for Snyk testing: Go repos snyk-demo-go-N whose go.mod files depend on deps-01 and on each other (the last one with no deps), or copies of Snyk's nodejs-goof / java-goof apps. Plans first and creates nothing until you approve.",
   "author": {
     "name": "Lovelyn Chinenye"
   },
   "repository": "https://github.com/brightsheets/snyk-plugin",
-  "keywords": ["go", "go-modules", "fixtures", "testing", "snyk", "github"]
+  "keywords": [
+    "go",
+    "go-modules",
+    "nodejs",
+    "java",
+    "demo",
+    "snyk",
+    "github"
+  ]
 }

@@ -15,7 +15,7 @@
     },
     {
       "name": "create-repo",
-      "description": "Create GitHub repos whose go.mod files depend on a shared module (deps-01) and on each other, plus one repo with no dependencies. Useful for testing Go dependency scanning such as Snyk. Plans first and creates nothing until you approve. Supports --dry-run.",
+      "description": "Create demo GitHub repos for Snyk testing: Go repos snyk-demo-go-N whose go.mod files depend on deps-01 and on each other (the last one with no deps), or copies of Snyk's nodejs-goof / java-goof apps. Plans first and creates nothing until you approve.",
       "source": "./plugins/create-repo",
       "author": {
         "name": "Lovelyn Chinenye"

@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+"""Create demo GitHub repos for Snyk testing.
+
+  make_repos.py plan 5                 # Go: snyk-demo-go-N x5. The first 4 depend on deps-01 and on
+                                       #     each other (go.mod, go.sum, code); the last has no deps
+  make_repos.py plan payments orders   # Go: these names, each with cross deps
+  make_repos.py plan node 3            # snyk-demo-node-N x3: copies of snyk-labs/nodejs-goof
+  make_repos.py plan java 2            # snyk-demo-java-N x2: copies of snyk-labs/java-goof
+  make_repos.py create <same> --apply  # actually create (plan/dry run never writes)
+  make_repos.py list                   # repos this script made
+
+Numbered names continue after the highest existing one, so they never clash. New repos are private
+unless --public. Go: if deps-01 is empty it is seeded with a small Go package tagged v0.1.0 first.
+Never overwrites, force-pushes or deletes. Needs gh (repo scope) and git; go is optional (go.sum).
+"""
+import argparse, base64, json, os, re, shutil, subprocess, sys, tempfile, time
+
+TOPIC = "go-deps-fixture"
+MARKER = ".go-deps-fixture"
+MAX_COUNT = 100        # GitHub throttles bulk content creation; stay well under its limits
+GO_VERSION = "1.21"
+
+
+# ---------- helpers ----------
+
+def run(cmd, cwd=None, env=None, check=True):
+    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        sys.exit(f"Command failed: {' '.join(cmd)}\n{r.stderr.strip() or r.stdout.strip()}")
+    return r
+
+
+def gh_api(path, check=False):
+    r = run(["gh", "api", path], check=False)
+    if r.returncode != 0:
+        if check:
+            sys.exit(f"gh api {path} failed: {r.stderr.strip()}")
+        return None
+    return json.loads(r.stdout) if r.stdout.strip() else None
+
+
+def git_env(owner):
+    """git/go use gh's login for github.com, without changing any global git config."""
+    env = dict(os.environ)
+    env.update({
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "credential.https://github.com.helper",
+        "GIT_CONFIG_VALUE_0": "!gh auth git-credential",
+        "GOPRIVATE": f"github.com/{owner}/*",
+        "GOFLAGS": "-mod=mod",
+        "GOTOOLCHAIN": "local",
+    })
+    return env
+
+
+def pkg_name(repo):
+    name = re.sub(r"[^a-z0-9]", "", repo.lower())
+    return name if name and not name[0].isdigit() else "p" + name
+
+
+def identity():
+    """Commit author: the user's git config, else their GitHub name and private noreply address."""
+    name = run(["git", "config", "user.name"], check=False).stdout.strip()
+    email = run(["git", "config", "user.email"], check=False).stdout.strip()
+    if name and email:
+        return name, email
+    u = gh_api("user", check=True)
+    return name or u.get("name") or u["login"], email or f'{u["login"]}@users.noreply.github.com'
+
+
+# ---------- repo state ----------
+
+def repo_state(owner, name):
+    """None if missing, else dict(empty, tags, marker, root_go, module)."""
+    info = gh_api(f"repos/{owner}/{name}")
+    if not info:
+        return None
+    contents = gh_api(f"repos/{owner}/{name}/contents/")
+    st = {"visibility": info.get("visibility"), "empty": contents is None}
+    files = [c["name"] for c in contents or []]
+    st["marker"] = MARKER in files
+    st["root_go"] = any(f.endswith(".go") and not f.endswith("_test.go") for f in files)
+    tags = gh_api(f"repos/{owner}/{name}/tags?per_page=100") or []
+    st["tags"] = [t["name"] for t in tags if re.match(r"^v\d+\.\d+\.\d+$", t["name"])]
+    st["module"] = None
+    if "go.mod" in files:
+        gm = gh_api(f"repos/{owner}/{name}/contents/go.mod")
+        if gm and gm.get("content"):
+            text = base64.b64decode(gm["content"]).decode(errors="replace")
+            m = re.search(r"^module\s+(\S+)", text, re.M)
+            st["module"] = m and m.group(1)
+    return st
+
+
+def latest(tags):
+    return max(tags, key=lambda t: tuple(int(x) for x in t[1:].split("."))) if tags else None
+
+
+# ---------- file contents ----------
+
+def deps_files(owner, deps):
+    mod = f"github.com/{owner}/{deps}"
+    return {
+        "go.mod": f"module {mod}\n\ngo {GO_VERSION}\n",
+        "deps.go": (f"// Package deps is a shared module that the snyk-demo-go repos depend on.\n"
+                    f"package deps\n\nimport \"fmt\"\n\n"
+                    f"// Version identifies this module.\nfunc Version() string {{ return \"{deps} v0.1.0\" }}\n\n"
+                    f"// Greet is called by every dependent library.\n"
+                    f"func Greet(caller string) string {{ return fmt.Sprintf(\"%s uses {deps}\", caller) }}\n"),
+        "README.md": f"# {deps}\n\nShared Go module. Fixture repos tagged `{TOPIC}` depend on it.\n",
+        MARKER: "created by go-deps-fixtures\n",
+    }
+
+
+def lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, version):
+    mod = f"github.com/{owner}/{name}"
+    pkg = pkg_name(name)
+    imports = [f'\tdeps "{deps_mod}"' if deps_callable else f'\t_ "{deps_mod}"']
+    parts = [f'deps.Greet("{name}")'] if deps_callable else [f'"{name} uses {deps_mod}"']
+    for p in prev:
+        imports.append(f'\t{pkg_name(p)} "github.com/{owner}/{p}"')
+        parts.append(f"{pkg_name(p)}.ID")  # a constant, not Name(): calling Name() would grow exponentially
+    requires = [f"\t{deps_mod} {deps_ver}"] + [f"\tgithub.com/{owner}/{p} {version}" for p in prev]
+    body = " + \" | \" + ".join(parts)
+    return {
+        "go.mod": f"module {mod}\n\ngo {GO_VERSION}\n\nrequire (\n" + "\n".join(requires) + "\n)\n",
+        f"{pkg}.go": (f"// Package {pkg} is a fixture library with cross-repo Go module dependencies.\n"
+                      f"package {pkg}\n\nimport (\n" + "\n".join(imports) + "\n)\n\n"
+                      f"// ID is this module's name.\nconst ID = \"{name}\"\n\n"
+                      f"// Name reports this library and its direct dependencies.\n"
+                      f"func Name() string {{ return {body} }}\n"),
+        "README.md": (f"# {name}\n\nFixture Go library. Depends on `{deps_mod}`"
+                      + (", " + ", ".join(f"`github.com/{owner}/{p}`" for p in prev) if prev else "")
+                      + ".\n"),
+        MARKER: "created by go-deps-fixtures\n",
+    }
+
+
+def standalone_files(owner, name):
+    return {
+        "go.mod": f"module github.com/{owner}/{name}\n\ngo {GO_VERSION}\n",
+        "main.go": ("// Command " + name + " has no module dependencies: standard library only.\n"
+                    "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"" + name + ": no dependencies\") }\n"),
+        "README.md": f"# {name}\n\nFixture Go module with no dependencies (standard library only).\n",
+        MARKER: "created by go-deps-fixtures\n",
+    }
+
+
+
+# ---------- languages ----------
+
+# Copied demo apps: a fresh snapshot of the source repo's default branch (one commit,
+# files as upstream has them). Cloned, not forked: GitHub allows one fork per source repo per account, and
+# forks of public repos can't be private.
+SOURCES = {"node": "snyk-labs/nodejs-goof", "java": "snyk-labs/java-goof"}
+LANGS = {"go": "go", "golang": "go", "node": "node", "nodejs": "node", "js": "node",
+         "javascript": "node", "java": "java"}
+DEMO_TOPIC = "snyk-demo"
+
+
+# ---------- planning ----------
+
+def parse_items(a):
+    """Split positional args into (lang, count, names). Language word first is optional."""
+    items = [x.strip() for item in a.items for x in item.split(",") if x.strip()]
+    lang = a.lang
+    if items and items[0].lower() in LANGS:
+        lang = LANGS[items.pop(0).lower()]
+    lang = LANGS.get((lang or "go").lower()) or sys.exit(f"Unknown language {lang!r}; use go, node or java.")
+    count, names = a.count, []
+    if len(items) == 1 and items[0].isdigit():
+        count = int(items[0])
+    elif items:
+        if any(x.isdigit() for x in items):
+            sys.exit("Give either a number or repo names, not both.")
+        names = items
+    bad = [n for n in names if not re.match(r"^[A-Za-z0-9._-]+$", n) or n == a.deps]
+    if bad:
+        sys.exit(f"Not valid new repo names: {bad}")
+    if len(set(names)) != len(names):
+        sys.exit("Repo names must be different from each other.")
+    total = count or 5
+    if not names and not 1 <= total <= MAX_COUNT:
+        sys.exit(f"Number of repos must be 1..{MAX_COUNT}")
+    return lang, total, names
+
+
+def existing_names(owner):
+    r = run(["gh", "repo", "list", owner, "--limit", "4000", "--json", "name", "-q", ".[].name"])
+    return set(r.stdout.split())
+
+
+def numbered(owner, prefix, n):
+    """n free names <prefix>-K, continuing after the highest existing K."""
+    pat = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
+    start = max([int(m.group(1)) for x in existing_names(owner) if (m := pat.match(x))] + [0]) + 1
+    return [f"{prefix}-{i}" for i in range(start, start + n)]
+
+
+def build_plan(a):
+    owner = a.owner
+    lang, total, names = parse_items(a)
+    plan = {"owner": owner, "lang": lang, "visibility": "public" if a.public else "private",
+            "version": a.version, "repos": []}
+    prefix = a.prefix or f"snyk-demo-{lang}"
+    auto = not names
+    if auto:
+        names = numbered(owner, prefix, total)
+
+    if lang in SOURCES:
+        src = SOURCES[lang]
+        plan["source"] = src
+        for n in names:
+            plan["repos"].append({"name": n, "kind": "copy", "source": src})
+    else:
+        deps_mod = f"github.com/{owner}/{a.deps}"
+        ds = repo_state(owner, a.deps)
+        if ds is None:
+            sys.exit(f"{owner}/{a.deps} does not exist. Create it first (it can be empty).")
+        if ds["empty"]:
+            plan["repos"].append({"name": a.deps, "kind": "deps", "action": "seed", "files": deps_files(owner, a.deps)})
+            deps_ver, deps_callable = a.version, True
+        else:
+            if ds["module"] and ds["module"] != deps_mod:
+                sys.exit(f"{owner}/{a.deps} go.mod declares module {ds['module']}, expected {deps_mod}.")
+            if not ds["module"] or not ds["root_go"]:
+                sys.exit(f"{owner}/{a.deps} has code but no go.mod or no Go package at its root; repos can't import it.")
+            deps_ver = latest(ds["tags"])
+            if not deps_ver:
+                sys.exit(f"{owner}/{a.deps} has no vX.Y.Z tag. Tag it (e.g. v0.1.0) so go.mod can require it.")
+            deps_callable = ds["marker"]  # our own seed has deps.Greet; otherwise import it for side effects
+            plan["repos"].append({"name": a.deps, "kind": "deps", "action": "reuse", "version": deps_ver})
+        plan["deps"] = {"module": deps_mod, "version": deps_ver, "calls_greet": deps_callable}
+
+        # With a number, the last repo is the one without deps (unless only one repo).
+        standalone = a.standalone or (names[-1] if auto and len(names) > 1 else None)
+        libs = [n for n in names if n != standalone]
+        for i, name in enumerate(libs):
+            prev = libs[max(0, i - 2):i][::-1]
+            plan["repos"].append({"name": name, "kind": "go-deps", "requires": [a.deps] + prev,
+                                  "files": lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, a.version)})
+        if standalone:
+            plan["repos"].append({"name": standalone, "kind": "go-no-deps", "requires": [],
+                                  "files": standalone_files(owner, standalone)})
+
+    for r in plan["repos"]:
+        if r["kind"] == "deps":
+            continue
+        st = None if auto else repo_state(owner, r["name"])
+        if st is None:
+            r["action"] = "create"
+        elif r["kind"] != "copy" and st["marker"] and a.version in st["tags"]:
+            r["action"] = "reuse"
+        else:
+            sys.exit(f"{owner}/{r['name']} already exists. Pick another name, "
+                     "or just give a number to get free names automatically.")
+    return plan
+
+
+def print_plan(plan):
+    print(f"Owner {plan['owner']}, new repos {plan['visibility']}")
+    if plan["lang"] in SOURCES:
+        print(f"Each repo is a copy of https://github.com/{plan['source']} (latest code, one commit)")
+    else:
+        print(f"Go repos, tag {plan['version']}. Shared module {plan['deps']['module']} @ {plan['deps']['version']}"
+              + ("" if plan['deps']['calls_greet'] else " (imported for side effects: not seeded by this script)"))
+    for r in plan["repos"]:
+        what = ("copy of " + r["source"]) if r["kind"] == "copy" else \
+               ("shared module" if r["kind"] == "deps" else "deps: " + (", ".join(r["requires"]) or "none"))
+        print(f"  {r['action']:<7} {r['name']:<24} {what}")
+    n = sum(r["action"] in ("create", "seed") for r in plan["repos"])
+    print(f"{n} repo(s) to create or seed." + ("" if n else " Nothing to do."))
+
+
+# ---------- apply ----------
+
+def git_cmd(author):
+    return ["git", "-c", f"user.name={author[0]}", "-c", f"user.email={author[1]}"]
+
+
+def create_remote(plan, r, description):
+    if r["action"] == "create":
+        run(["gh", "repo", "create", f"{plan['owner']}/{r['name']}", f"--{plan['visibility']}",
+             "--description", description])
+
+
+def push_repo(plan, r, author, env, has_go, delay):
+    owner, name = plan["owner"], r["name"]
+    url = f"https://github.com/{owner}/{name}.git"
+    create_remote(plan, r, "Go module demo with cross-repo dependencies" if r["kind"] != "deps"
+                  else "Shared Go module")
+    work = tempfile.mkdtemp(prefix=f"{name}-")
+    try:
+        for path, text in r["files"].items():
+            with open(os.path.join(work, path), "w") as f:
+                f.write(text)
+        if has_go and r.get("requires"):
+            res = run(["go", "mod", "tidy"], cwd=work, env=env, check=False)
+            if res.returncode != 0:
+                sys.exit(f"go mod tidy failed in {name}:\n{res.stderr.strip()}")
+        g = git_cmd(author)
+        run(["git", "init", "-q", "-b", "main"], cwd=work)
+        run(g + ["add", "-A"], cwd=work)
+        run(g + ["commit", "-q", "-m", "Add Go module" + (" with cross-repo dependencies" if r.get("requires") else "")], cwd=work)
+        run(g + ["tag", "-a", plan["version"], "-m", plan["version"]], cwd=work)
+        run(["git", "push", "-q", url, "main", plan["version"]], cwd=work, env=env)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    run(["gh", "repo", "edit", f"{owner}/{name}", "--add-topic", TOPIC, "--add-topic", DEMO_TOPIC], check=False)
+    print(f"  {r['action']:<7} https://github.com/{owner}/{name}")
+    time.sleep(delay)
+
+
+def fetch_source(src, env):
+    """Shallow clone of the source's default branch; returns (dir, short sha)."""
+    d = tempfile.mkdtemp(prefix="src-")
+    run(["git", "clone", "-q", "--depth", "1", f"https://github.com/{src}.git", d], env=env)
+    sha = run(["git", "rev-parse", "--short", "HEAD"], cwd=d).stdout.strip()
+    shutil.rmtree(os.path.join(d, ".git"))
+    return d, sha
+
+
+def push_copy(plan, r, src_dir, sha, author, env, delay):
+    owner, name = plan["owner"], r["name"]
+    create_remote(plan, r, f"Snyk demo app, copied from {r['source']}")
+    work = tempfile.mkdtemp(prefix=f"{name}-")
+    try:
+        shutil.copytree(src_dir, work, dirs_exist_ok=True, symlinks=True)
+        g = git_cmd(author)
+        run(["git", "init", "-q", "-b", "main"], cwd=work)
+        run(g + ["add", "-A"], cwd=work)
+        run(g + ["commit", "-q", "-m", f"Import https://github.com/{r['source']} at {sha}"], cwd=work)
+        run(["git", "push", "-q", f"https://github.com/{owner}/{name}.git", "main"], cwd=work, env=env)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    run(["gh", "repo", "edit", f"{owner}/{name}", "--add-topic", DEMO_TOPIC], check=False)
+    print(f"  {r['action']:<7} https://github.com/{owner}/{name}")
+    time.sleep(delay)
+
+
+def cmd_plan(a):
+    print_plan(build_plan(a))
+
+
+def cmd_create(a):
+    plan = build_plan(a)
+    print_plan(plan)
+    if not a.apply:
+        print("\nDry run. Rerun with --apply to create these repos.")
+        return
+    author, env = identity(), git_env(plan["owner"])
+    print()
+    if plan["lang"] in SOURCES:
+        src_dir, sha = fetch_source(plan["source"], env)
+        try:
+            for r in plan["repos"]:
+                if r["action"] == "create":
+                    push_copy(plan, r, src_dir, sha, author, env, a.delay)
+        finally:
+            shutil.rmtree(src_dir, ignore_errors=True)
+    else:
+        has_go = shutil.which("go") is not None
+        if not has_go:
+            print("Note: go isn't installed, so go.sum files are left out (go.mod still lists every require).\n")
+        for r in plan["repos"]:  # order matters: deps, then libs low to high, then the no-deps repo
+            if r["action"] in ("create", "seed"):
+                push_repo(plan, r, author, env, has_go, a.delay)
+    print("Done.")
+
+
+def cmd_list(a):
+    r = run(["gh", "repo", "list", a.owner, "--limit", "4000", "--json", "name,visibility,url,repositoryTopics"])
+    rows = [x for x in json.loads(r.stdout or "[]")
+            if {t["name"] for t in x.get("repositoryTopics") or []} & {TOPIC, DEMO_TOPIC}]
+    for x in sorted(rows, key=lambda x: x["name"]):
+        print(f'{x["name"]:<32} {x["visibility"].lower():<8} {x["url"]}')
+    print(f"{len(rows)} repo(s) made by create-repo.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name, fn in (("plan", cmd_plan), ("create", cmd_create)):
+        p = sub.add_parser(name)
+        p.add_argument("items", nargs="*", help="[go|node|java] then a number of repos (default 5) or repo names")
+        p.add_argument("--lang", help="go (default), node or java")
+        p.add_argument("--count", type=int, help=f"number of repos, 1..{MAX_COUNT} (same as giving a number)")
+        p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
+        p.add_argument("--prefix", help="name prefix for numbered repos (default snyk-demo-<lang>)")
+        p.add_argument("--deps", default="deps-01", help="Go: shared module repo (default deps-01)")
+        p.add_argument("--standalone", help="Go: name of the repo with no deps (default: the last numbered one)")
+        p.add_argument("--version", default="v0.1.0", help="Go: tag for new repos (default v0.1.0)")
+        p.add_argument("--public", action="store_true", help="make new repos public (default private)")
+        p.add_argument("--delay", type=float, default=2.0, help="seconds between repos (default 2)")
+        if name == "create":
+            p.add_argument("--apply", action="store_true", help="actually create (default is dry run)")
+        p.set_defaults(fn=fn)
+    p = sub.add_parser("list"); p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
+    p.set_defaults(fn=cmd_list)
+    a = ap.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

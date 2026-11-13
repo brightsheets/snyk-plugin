@@ -5,7 +5,7 @@ A Claude Code plugin marketplace.
 | Command | What it does |
 |---|---|
 | `/snyk-onboard <repo> [repo ...]` | Onboards one or more GitHub repos (or `--org <org>`) to Snyk: detects the stack, imports through Snyk's GitHub integration into the `brightsheets` Snyk org, and opens a CI pull request. A bare name means `brightsheets/<name>`. [Details](plugins/snyk-onboard/skills/snyk-onboard/SKILL.md) |
-| `/create-repo 5` or `/create-repo name1 name2` | Creates Go repos in `brightsheets` and adds the deps automatically: `go.mod`/`go.sum` depending on `deps-01` and on each other. With a number, names are picked for you and one of the repos has no deps. [Details](plugins/create-repo/skills/create-repo/SKILL.md) |
+| `/create-repo 5` · `/create-repo node 3` · `/create-repo java 2` | Creates demo repos in `brightsheets`. Go: `snyk-demo-go-1…5` with `go.mod` deps on `deps-01` and each other (the last has none). Node/Java: copies of Snyk's `nodejs-goof` / `java-goof`. [Details](plugins/create-repo/skills/create-repo/SKILL.md) |
 
 `/snyk-onboard --file repos.txt` reads the repos from a file instead: one per line, `#` for comments.
 
@@ -23,7 +23,7 @@ Add `--dry-run` to either one to see the plan without changing anything.
 
 ```
 /create-repo 5
-/snyk-onboard go-lib-01 go-lib-02 --dry-run
+/snyk-onboard snyk-demo-go-1 snyk-demo-go-2 --dry-run
 ```
 
 Sign in first: `gh auth login` and `snyk auth`. The default Snyk org is [`brightsheets`](https://app.snyk.io/org/brightsheets); set `SNYK_ORG` to use another.
