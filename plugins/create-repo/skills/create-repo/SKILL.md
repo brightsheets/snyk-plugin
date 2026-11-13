@@ -2,8 +2,8 @@
 name: create-repo
 description: >-
   Create demo GitHub repos in brightsheets for Snyk testing. Go (default): snyk-demo-go-1, -2, ...
-  whose go.mod files depend on brightsheets/deps-01 and on each other, with the last one having no
-  deps. Node or Java: snyk-demo-node-N / snyk-demo-java-N, each a copy of snyk-labs/nodejs-goof or
+  whose go.mod files have cross-org deps on brightsheets/deps-01 and on each other, with the last one
+  having public deps only (no cross-org deps). Node or Java: snyk-demo-node-N / snyk-demo-java-N, each a copy of snyk-labs/nodejs-goof or
   snyk-labs/java-goof. Use when the user wants to create demo, test or fixture repos, Go repos with
   cross-repo dependencies, or copies of the Snyk goof apps. Plans first and creates nothing until
   the user approves. Supports --dry-run.
@@ -41,10 +41,10 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 
 | Command | Repos |
 |---|---|
-| `/create-repo 5` (Go is the default) | `snyk-demo-go-1` … `-5`. Repos 1–4 each have a `go.mod` (and `go.sum` when Go is installed) that requires and calls `deps-01` plus the one or two repos before it. Repo 5 has no deps at all. Tagged `v0.1.0`. |
+| `/create-repo 5` (Go is the default) | `snyk-demo-go-1` … `-5`. Repos 1–4 have **cross-org deps**: each `go.mod` (and `go.sum` when Go is installed) requires and calls `deps-01` plus the one or two repos before it. Repo 5 has **public deps only**, no cross-org deps: `github.com/google/uuid` and `golang.org/x/text` v0.3.7 (deliberately old, with a known vulnerability, so Snyk finds something). Tagged `v0.1.0`. |
 | `/create-repo node 3` | `snyk-demo-node-1` … `-3`, each a copy of the latest [snyk-labs/nodejs-goof](https://github.com/snyk-labs/nodejs-goof) (a deliberately vulnerable Node.js app). |
 | `/create-repo java 2` | `snyk-demo-java-1` … `-2`, each a copy of the latest [snyk-labs/java-goof](https://github.com/snyk-labs/java-goof). |
-| `/create-repo payments orders` | Those names. For Go, each gets cross deps. `--standalone NAME` adds a Go repo with no deps. |
+| `/create-repo payments orders` | Those names. For Go, each gets cross deps. `--standalone NAME` adds a Go repo with public deps only. |
 
 - **Numbering:** numbers continue after the highest existing one (if `snyk-demo-go-5` exists, the next run starts at 6), so names never clash. A name the user gives that already exists stops the run.
 - **Copies, not forks:** GitHub allows only one fork of a repo per account, and forks of public repos can't be private.
@@ -71,7 +71,7 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 
 ## Using them with snyk-onboard
 
-`/snyk-onboard snyk-demo-go-1 snyk-demo-go-2 snyk-demo-node-1 --dry-run`. With private repos and the Snyk GitHub App limited to selected repos, a Go repo's import can fail until its dependency repos are also granted; `snyk_import.py import --fix-deps` handles that. The Go repo with no deps is the control: it should import cleanly.
+`/snyk-onboard snyk-demo-go-1 snyk-demo-go-2 snyk-demo-node-1 --dry-run`. With private repos and the Snyk GitHub App limited to selected repos, a Go repo's import can fail until its dependency repos are also granted; `snyk_import.py import --fix-deps` handles that. The Go repo with public deps only is the control: it imports without needing access to other brightsheets repos.
 
 ## Removing them
 

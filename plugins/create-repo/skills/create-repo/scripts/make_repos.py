@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Create demo GitHub repos for Snyk testing.
 
-  make_repos.py plan 5                 # Go: snyk-demo-go-N x5. The first 4 depend on deps-01 and on
-                                       #     each other (go.mod, go.sum, code); the last has no deps
+  make_repos.py plan 5                 # Go: snyk-demo-go-N x5. The first 4 have cross-org deps on deps-01
+                                       #     and each other; the last has public deps only (uuid, x/text)
   make_repos.py plan payments orders   # Go: these names, each with cross deps
   make_repos.py plan node 3            # snyk-demo-node-N x3: copies of snyk-labs/nodejs-goof
   make_repos.py plan java 2            # snyk-demo-java-N x2: copies of snyk-labs/java-goof
@@ -137,12 +137,20 @@ def lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, version):
     }
 
 
+# Public modules for the repo without cross-org deps. x/text v0.3.7 is deliberately old: it has a
+# known vulnerability (CVE-2022-32149), so Snyk reports something on this repo too.
+PUBLIC_DEPS = [("github.com/google/uuid", "v1.6.0"), ("golang.org/x/text", "v0.3.7")]
+
+
 def standalone_files(owner, name):
+    reqs = "\n".join(f"\t{m} {v}" for m, v in PUBLIC_DEPS)
     return {
-        "go.mod": f"module github.com/{owner}/{name}\n\ngo {GO_VERSION}\n",
-        "main.go": ("// Command " + name + " has no module dependencies: standard library only.\n"
-                    "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"" + name + ": no dependencies\") }\n"),
-        "README.md": f"# {name}\n\nFixture Go module with no dependencies (standard library only).\n",
+        "go.mod": f"module github.com/{owner}/{name}\n\ngo {GO_VERSION}\n\nrequire (\n{reqs}\n)\n",
+        "main.go": ("// Command " + name + " uses public modules only: no dependencies on other " + owner + " repos.\n"
+                    "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/google/uuid\"\n\t\"golang.org/x/text/language\"\n)\n\n"
+                    "func main() {\n\tfmt.Println(\"" + name + "\", uuid.NewString(), language.Make(\"en-US\").String())\n}\n"),
+        "README.md": (f"# {name}\n\nGo module with public dependencies only "
+                      f"({', '.join(m for m, _ in PUBLIC_DEPS)}), no cross-org dependencies.\n"),
         MARKER: "created by go-deps-fixtures\n",
     }
 
@@ -233,7 +241,7 @@ def build_plan(a):
             plan["repos"].append({"name": a.deps, "kind": "deps", "action": "reuse", "version": deps_ver})
         plan["deps"] = {"module": deps_mod, "version": deps_ver, "calls_greet": deps_callable}
 
-        # With a number, the last repo is the one without deps (unless only one repo).
+        # With a number, the last repo has public deps only, no cross-org deps (unless only one repo).
         standalone = a.standalone or (names[-1] if auto and len(names) > 1 else None)
         libs = [n for n in names if n != standalone]
         for i, name in enumerate(libs):
@@ -241,7 +249,7 @@ def build_plan(a):
             plan["repos"].append({"name": name, "kind": "go-deps", "requires": [a.deps] + prev,
                                   "files": lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, a.version)})
         if standalone:
-            plan["repos"].append({"name": standalone, "kind": "go-no-deps", "requires": [],
+            plan["repos"].append({"name": standalone, "kind": "go-public-deps", "requires": [m for m, _ in PUBLIC_DEPS],
                                   "files": standalone_files(owner, standalone)})
 
     for r in plan["repos"]:
@@ -267,7 +275,8 @@ def print_plan(plan):
               + ("" if plan['deps']['calls_greet'] else " (imported for side effects: not seeded by this script)"))
     for r in plan["repos"]:
         what = ("copy of " + r["source"]) if r["kind"] == "copy" else \
-               ("shared module" if r["kind"] == "deps" else "deps: " + (", ".join(r["requires"]) or "none"))
+               ("shared module" if r["kind"] == "deps" else
+                ("public deps only: " if r["kind"] == "go-public-deps" else "cross-org deps: ") + (", ".join(r["requires"]) or "none"))
         print(f"  {r['action']:<7} {r['name']:<24} {what}")
     n = sum(r["action"] in ("create", "seed") for r in plan["repos"])
     print(f"{n} repo(s) to create or seed." + ("" if n else " Nothing to do."))
@@ -302,7 +311,7 @@ def push_repo(plan, r, author, env, has_go, delay):
         g = git_cmd(author)
         run(["git", "init", "-q", "-b", "main"], cwd=work)
         run(g + ["add", "-A"], cwd=work)
-        run(g + ["commit", "-q", "-m", "Add Go module" + (" with cross-repo dependencies" if r.get("requires") else "")], cwd=work)
+        run(g + ["commit", "-q", "-m", {"go-deps": "Add Go module with cross-org dependencies", "go-public-deps": "Add Go module with public dependencies only"}.get(r["kind"], "Add Go module")], cwd=work)
         run(g + ["tag", "-a", plan["version"], "-m", plan["version"]], cwd=work)
         run(["git", "push", "-q", url, "main", plan["version"]], cwd=work, env=env)
     finally:
@@ -389,7 +398,7 @@ def main():
         p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
         p.add_argument("--prefix", help="name prefix for numbered repos (default snyk-demo-<lang>)")
         p.add_argument("--deps", default="deps-01", help="Go: shared module repo (default deps-01)")
-        p.add_argument("--standalone", help="Go: name of the repo with no deps (default: the last numbered one)")
+        p.add_argument("--standalone", help="Go: name of the repo with public deps only (default: the last numbered one)")
         p.add_argument("--version", default="v0.1.0", help="Go: tag for new repos (default v0.1.0)")
         p.add_argument("--public", action="store_true", help="make new repos public (default private)")
         p.add_argument("--delay", type=float, default=2.0, help="seconds between repos (default 2)")

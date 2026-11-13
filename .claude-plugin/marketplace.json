@@ -15,7 +15,7 @@
     },
     {
       "name": "create-repo",
-      "description": "Create demo GitHub repos for Snyk testing: Go repos snyk-demo-go-N whose go.mod files depend on deps-01 and on each other (the last one with no deps), or copies of Snyk's nodejs-goof / java-goof apps. Plans first and creates nothing until you approve.",
+      "description": "Create demo GitHub repos for Snyk testing: Go repos snyk-demo-go-N whose go.mod files have cross-org deps on deps-01 and on each other (the last one has public deps only), or copies of Snyk's nodejs-goof / java-goof apps. Plans first and creates nothing until you approve.",
       "source": "./plugins/create-repo",
       "author": {
         "name": "Lovelyn Chinenye"
