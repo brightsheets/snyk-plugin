@@ -176,6 +176,18 @@ def stage_app(orgs):
 SET_TOKEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "set_env_token.sh")
 
 
+def token_steps(owner, user, scopes, create):
+    """The exact message shown when GH_APP_ADMIN_TOKEN is missing or unusable. The skill prints it verbatim."""
+    who = (f"from the {owner} account" if user else
+           f"from an owner of the {owner} org or a Snyk app manager, authorized for {owner}'s SSO if it uses SSO")
+    return (f"- Token: create a new token or use an existing one: classic (ghp_...), scope {' + '.join(scopes)} only, "
+            f"{who}, expiring in 7-30 days. Create: {create}\n"
+            "- Export command: run this in your terminal, then restart Claude Code from that terminal:\n"
+            "    read -rs -p \"GH_APP_ADMIN_TOKEN: \" GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN\n"
+            "    claude --continue\n"
+            "Reply \"done\" when it's set and I'll continue.")
+
+
 def check_admin_token(owner):
     """GH_APP_ADMIN_TOKEN lets the importer add repos to the Snyk app. Warn (never block) if missing or wrong."""
     user = owner_is_user(owner)
@@ -186,15 +198,8 @@ def check_admin_token(owner):
     setter = f"bash {SET_TOKEN} GH_APP_ADMIN_TOKEN"
     token = os.environ.get("GH_APP_ADMIN_TOKEN")
     if not token:
-        extra = "" if user else "; Configure SSO -> Authorize for the org if it uses SSO"
-        report("app", False, f"GH_APP_ADMIN_TOKEN isn't set, so the plugin can't add repos to the Snyk app for {owner} "
-               "(PR checks and fix PRs need each repo in the app).",
-               f"Token: classic (ghp_...), {who}, scope(s) {' + '.join(scopes_needed)} only, short expiry (7-30 days){extra}.\n"
-               f"  Create: {create}\n"
-               "Export it in your terminal, then start Claude Code from that same terminal:\n"
-               "  read -rs -p \"GH_APP_ADMIN_TOKEN: \" GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN\n"
-               "  claude --continue\n"
-               f"(Or save it to ~/.claude/settings.json instead: {setter})", blocking=False)
+        report("app", False, "GH_APP_ADMIN_TOKEN isn't set.", token_steps(owner, user, scopes_needed, create),
+               blocking=False)
         return
     import urllib.request, urllib.error
     req = urllib.request.Request("https://api.github.com/user", headers={
@@ -206,17 +211,16 @@ def check_admin_token(owner):
             login = json.loads(r.read()).get("login", "?")
     except urllib.error.HTTPError as e:
         report("app", False, f"GH_APP_ADMIN_TOKEN is set but GitHub rejects it (HTTP {e.code}).",
-               f"Make a new one ({create}) and run: {setter}", blocking=False)
+               token_steps(owner, user, scopes_needed, create), blocking=False)
         return
     missing = [sc for sc in scopes_needed if sc not in have and not (sc == "admin:org" and "write:org" in have)]
     if not classic:
         report("app", False, f"GH_APP_ADMIN_TOKEN ({login}) is a fine-grained or app token; GitHub only accepts a "
                "classic token for adding repos to an app installation.",
-               f"Create a classic one: {create}\nThen run: {setter}", blocking=False)
+               token_steps(owner, user, scopes_needed, create), blocking=False)
     elif missing:
         report("app", False, f"GH_APP_ADMIN_TOKEN ({login}) lacks scope(s): {', '.join(missing)}.",
-               f"Edit the token to add them (github.com/settings/tokens) or create a new one: {create}\n"
-               f"Then run: {setter}", blocking=False)
+               token_steps(owner, user, scopes_needed, create), blocking=False)
     else:
         report("app", True, f"GH_APP_ADMIN_TOKEN is a classic token of {login} with {', '.join(sorted(have & set(scopes_needed)))}: "
                "repos are added to the Snyk app automatically")

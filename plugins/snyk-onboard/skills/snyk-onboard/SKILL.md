@@ -132,16 +132,15 @@ It's read-only except for one thing: if the Snyk MCP server is missing and the s
 | `app` | That Snyk org has no GitHub Cloud App integration | Give the user the link it prints and ask them to click Install on GitHub. Offer to wait: rerun with `--wait` (polls every 10 s, up to `--wait-minutes`, default 10) and continue as soon as the install shows up. Installing a GitHub App always needs that one click by the account or org owner; it can't be automated. |
 | `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the Snyk MCP server line: the check adds it automatically once the snyk CLI is installed; when it reports *Added*, tell the user to run `/mcp` or restart Claude Code to load the `mcp__snyk__*` tools. |
 
-**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is fine-grained, or lacks a scope): **don't ask, just show it and carry on.** Show, from what the check printed:
-1. **Permissions:** a classic token (`ghp_…`); `repo` scope for a personal account, `repo` + `admin:org` for an organization (authorized for the org's SSO if it uses one); the account owner's (personal) or an org owner's / Snyk app manager's (org); nothing else ticked; short expiry; the create link.
-2. **Export command**, to run in their own terminal before starting Claude Code from it (`claude --continue` resumes the conversation):
-   ```
-   read -rs -p "GH_APP_ADMIN_TOKEN: " GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN
-   claude --continue
-   ```
-   One line: exporting with `!` inside Claude Code doesn't reach later commands; `set_env_token.sh` saves it to settings instead.
+**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is rejected, is fine-grained, or lacks a scope): print the check's headline and its indented block **exactly as the check printed them, nothing added, removed or reworded**, in this shape:
 
-Then continue with step 1. The import still runs; repos just aren't added to the Snyk app by this run, so the report lists them with the manual link (`github.com/settings/installations` → Snyk → Configure → Repository access, or the org's installations page) and says a rerun with the token adds them. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
+> GH_APP_ADMIN_TOKEN isn't set.
+> - Token: create a new token or use an existing one: … permissions … Create: <link>
+> - Export command: … `read -rs …` / `claude --continue`
+>
+> Reply "done" when it's set and I'll continue.
+
+Then **stop** and wait. Don't ask a question about it and don't continue to step 1. When the user replies "done", start again from step 0 (run the check again). If the check still shows the token missing, print the same block again and stop again. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
 
 If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
 
@@ -236,6 +235,8 @@ Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - follow-ups: switch on Snyk Code in the org, add build tools, tune excludes, pin `snyk/actions/setup` to a commit SHA, tighten the severity gate later
 
 ## Rules
+- **No hallucination.** Every statement about GitHub, Snyk, tokens, projects or settings must come from a command run in this invocation; quote or summarize its output, never memory or an earlier run. If a command wasn't run or failed, say exactly that. Never claim a step happened (imported, added to the app, settings changed, PR opened) unless this run's output shows it.
+- **Follow the steps as written.** Run them in order, use the scripts' messages verbatim where a step says so (the GH_APP_ADMIN_TOKEN block), and don't add, skip or reorder steps.
 - Plan first. Writes happen only after the user approves: Snyk imports, branches, pushes, PRs. `--dry-run` writes nothing except the local plan file.
 - Never print, log or commit `SNYK_TOKEN`. Workflows read it only as `${{ secrets.SNYK_TOKEN }}`.
 - Never push to a default branch, merge a PR, enable auto-merge, or change repo or org settings or secrets. Two exceptions, each only after the user approves: with `--apply`, the importer adds approved repos to the Snyk GitHub App's repository access, and `integration-settings --apply` changes the Snyk org's PR-check and fix-PR settings.
