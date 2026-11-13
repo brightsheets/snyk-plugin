@@ -108,10 +108,25 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 
 ## Steps
 
-### 0. Check prerequisites
-1. **Snyk MCP.** If `mcp__snyk__*` tools are in your tool list, use them. If not, follow the `setup-mcp` skill: run its check, and if the server is missing, **ask** whether to install it. If the user says no, carry on with the `snyk` CLI and the scripts. Nothing below needs the MCP server.
-2. `gh auth status` must pass.
-3. Snyk credentials: `SNYK_TOKEN` is set, or `snyk whoami --experimental` succeeds (OAuth login). Never print a token's value. If neither works, stop and explain how to set one.
+### 0. Setup, one stage at a time
+Run the setup check from this skill's folder with the same repos:
+```
+python3 scripts/preflight.py --repo <owner/repo> [--repo …] [--file <path>] [--snyk-org <slug>]
+```
+It's read-only. It walks these stages in order, stops at the first one that isn't met, prints the fix, and ends with `NEXT=<stage>` (`NEXT=ready` when everything that blocks an import is in place). Handle the stage it names, then run it again; repeat until `NEXT=ready`. Show the user its checklist each time.
+
+| `NEXT=` | Stage | What to do |
+|---|---|---|
+| `gh` | GitHub CLI missing, signed out, or missing `repo` / `read:org` | Missing: **ask** (AskUserQuestion) "Install the GitHub CLI into ~/.local/bin?", then run `bash scripts/install_tools.sh gh`. Then the user signs in: `! gh auth login` (or `! gh auth refresh -h github.com -s repo,read:org`). |
+| `creds` | No `SNYK_TOKEN` and no signed-in snyk CLI | **Ask** "Install the Snyk CLI into ~/.local/bin?", then run `bash scripts/install_tools.sh snyk` (standalone binary, no Node.js). Then the user signs in: `! snyk auth`. Or they put `SNYK_TOKEN` in `~/.claude/settings.json` → `env` and restart. Never ask the user to paste a token into the chat, and never print one. |
+| `token` | The Snyk API rejects the credentials | Show the fix it prints: new token, `snyk auth` again, or `SNYK_API` for EU/AU tenants. |
+| `org` | No Snyk org named like a repo's GitHub owner | Give the user the create-org steps it prints. Don't import into a different org unless they pass `--snyk-org`. |
+| `app` | That Snyk org has no GitHub Cloud App integration | Give the user the link it prints and ask them to click Install on GitHub. Offer to wait: rerun with `--wait` (polls every 10 s, up to `--wait-minutes`, default 10) and continue as soon as the install shows up. Installing a GitHub App always needs that one click by the account or org owner; it can't be automated. |
+| `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the optional Snyk MCP server (offer `/snyk-onboard:setup-mcp`). |
+
+If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
+
+With `--dry-run`, still run the setup check and report where it stops, but don't install anything or wait.
 
 ### 1. Detect
 - **One or more repos, or `--file`:** first get the full list with `python3 scripts/snyk_import.py repos --repo <repos…> --file <path>` (it expands bare names to `brightsheets/<name>` and drops duplicates). Then run `python3 scripts/detect_stack.py --github owner/repo` (or `--path`) for each repo.

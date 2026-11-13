@@ -51,6 +51,22 @@ Override for one run with `--snyk-org <slug|id>`. Setting `SNYK_ORG` sends every
 | `--org <github-org>` | Every repo in that GitHub org (archived, forks and empty repos skipped). |
 | `--severity <level>` | Failure threshold for the generated CI: `low`, `medium`, `high` (default), `critical`. |
 
+### Setup is checked for you, one stage at a time
+
+Every `/snyk-onboard` run starts with a setup check (`scripts/preflight.py`). It stops at the first thing that's missing, says how to fix it, and continues from there on the next run:
+
+| # | Stage | If it's missing |
+|---|---|---|
+| 1 | GitHub CLI installed and signed in (`repo`, `read:org`) | Offers to install `gh` into `~/.local/bin` (no sudo, checksum-verified), then `gh auth login` |
+| 2 | Snyk credentials | Offers to install the Snyk CLI (standalone, no Node.js), then `snyk auth`; or `SNYK_TOKEN` in `~/.claude/settings.json` |
+| 3 | Snyk accepts the token | New token, `snyk auth` again, or `SNYK_API` for EU/AU |
+| 4 | A Snyk org named like each GitHub org | Steps to create it |
+| 5 | GitHub Cloud App integration in that Snyk org | The install link, and it can wait (`--wait`) while you click Install |
+| 6 | `SNYK_TOKEN` Actions secret on the repos | Warning with the `gh secret set` command (only CI needs it) |
+| 7 | Snyk MCP server | Optional; suggests `/snyk-onboard:setup-mcp` |
+
+Run it on its own: `python3 scripts/preflight.py --repo brightsheets/snyk-demo-node-1 [--wait]`. Install the CLIs by hand: `bash scripts/install_tools.sh gh snyk`.
+
 ### Before onboarding a GitHub org
 
 | Step | Where |
