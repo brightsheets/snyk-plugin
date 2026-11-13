@@ -137,7 +137,6 @@ It's read-only except for one thing: if the Snyk MCP server is missing and the s
 > GH_APP_ADMIN_TOKEN isn't set.
 > - Token: create a new token or use an existing one: … permissions …
 > - In a new terminal, run: export GH_APP_ADMIN_TOKEN=<your-token>
->   then start Claude Code from that terminal: claude --continue
 >
 > Then type "done" when it's completed.
 

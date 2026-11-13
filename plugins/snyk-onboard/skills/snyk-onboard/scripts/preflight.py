@@ -183,7 +183,6 @@ def token_steps(owner, user, scopes, create):
     return (f"- Token: create a new token or use an existing one: classic (ghp_...), scope {' + '.join(scopes)} only, "
             f"{who}\n"
             "- In a new terminal, run: export GH_APP_ADMIN_TOKEN=<your-token>\n"
-            "  then start Claude Code from that terminal: claude --continue\n"
             "Then type \"done\" when it's completed.")
 
 
