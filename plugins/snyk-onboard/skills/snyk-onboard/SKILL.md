@@ -135,12 +135,12 @@ It's read-only except for one thing: if the Snyk MCP server is missing and the s
 **`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is rejected, is fine-grained, or lacks a scope): print the check's headline and its indented block **exactly as the check printed them, nothing added, removed or reworded**, in this shape:
 
 > GH_APP_ADMIN_TOKEN isn't set.
-> - Token: create a new token or use an existing one: … permissions … Create: <link>
-> - Export command: … `read -rs …` / `claude --continue`
+> - Token: create a new token or use an existing one: … permissions …
+> - export GH_APP_ADMIN_TOKEN=<your-token>
 >
-> Reply "done" when it's set and I'll continue.
+> Then type "done" when it's completed.
 
-Then **stop** and wait. Don't ask a question about it and don't continue to step 1. When the user replies "done", start again from step 0 (run the check again). If the check still shows the token missing, print the same block again and stop again. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
+Then **stop** and wait. Don't ask a question about it and don't continue to step 1. When the user types "done", start again from step 0 (run the check again). If the check still shows the token missing, print the same block again and stop again. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
 
 If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
 

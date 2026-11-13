@@ -181,11 +181,9 @@ def token_steps(owner, user, scopes, create):
     who = (f"from the {owner} account" if user else
            f"from an owner of the {owner} org or a Snyk app manager, authorized for {owner}'s SSO if it uses SSO")
     return (f"- Token: create a new token or use an existing one: classic (ghp_...), scope {' + '.join(scopes)} only, "
-            f"{who}, expiring in 7-30 days. Create: {create}\n"
-            "- Export command: run this in your terminal, then restart Claude Code from that terminal:\n"
-            "    read -rs -p \"GH_APP_ADMIN_TOKEN: \" GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN\n"
-            "    claude --continue\n"
-            "Reply \"done\" when it's set and I'll continue.")
+            f"{who}\n"
+            "- export GH_APP_ADMIN_TOKEN=<your-token>\n"
+            "Then type \"done\" when it's completed.")
 
 
 def check_admin_token(owner):
