@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Create demo GitHub repos for Snyk testing.
 
-  make_repos.py plan 5                 # Go: snyk-demo-go-N x5. The first 4 have cross-org deps on deps-01
-                                       #     and each other; the last has public deps only (uuid, x/text)
+  make_repos.py plan                   # Go, default 2: snyk-demo-go-N with cross-org deps on deps-01,
+                                       #     and snyk-demo-go-N+1 with public deps only (uuid, x/text)
+  make_repos.py plan 5                 # Go: 5 repos; the first 4 have cross-org deps, the last public only
+                                       # Every Go repo gets .github/workflows/ci.yml calling
+                                       # brightsheets/reusable-workflows go-ci.yaml@v1
   make_repos.py plan payments orders   # Go: these names, each with cross deps
   make_repos.py plan node 3            # snyk-demo-node-N x3: copies of snyk-labs/nodejs-goof
   make_repos.py plan java 2            # snyk-demo-java-N x2: copies of snyk-labs/java-goof
@@ -113,6 +116,28 @@ def deps_files(owner, deps):
     }
 
 
+REUSABLE = os.environ.get("REUSABLE_WORKFLOWS", "brightsheets/reusable-workflows@v1")
+
+
+def caller_workflow(owner, private):
+    """.github/workflows/ci.yml calling the shared Go pipeline (lint, tests, Snyk)."""
+    repo, ref = REUSABLE.split("@", 1)
+    w = ["snyk-org: brightsheets"]
+    sec = ["snyk-token: ${{ secrets.SNYK_TOKEN }}"]
+    note = "Needs secret SNYK_TOKEN (without it the Snyk scan is skipped with a warning)"
+    if private:
+        w.append(f"go-private-owners: {owner}")
+        sec.append("go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}")
+        note += f",\n# and GO_MODULES_TOKEN: a token that can read the private {owner} repos this module imports"
+    return (f"# Runs {repo}/.github/workflows/go-ci.yaml@{ref}: lint, tests, Snyk Open Source + Code.\n"
+            f"# {note}.\n"
+            "name: CI\non:\n  push:\n    branches: [main, \"hotfix/**\"]\n  pull_request:\n  workflow_dispatch:\n"
+            "permissions:\n  contents: read\n  actions: read\n  security-events: write\n  pull-requests: write\n  packages: write\n"
+            f"jobs:\n  ci:\n    uses: {repo}/.github/workflows/go-ci.yaml@{ref}\n"
+            "    with:\n" + "".join(f"      {x}\n" for x in w) +
+            "    secrets:\n" + "".join(f"      {x}\n" for x in sec))
+
+
 def lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, version):
     mod = f"github.com/{owner}/{name}"
     pkg = pkg_name(name)
@@ -130,6 +155,7 @@ def lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, version):
                       f"// ID is this module's name.\nconst ID = \"{name}\"\n\n"
                       f"// Name reports this library and its direct dependencies.\n"
                       f"func Name() string {{ return {body} }}\n"),
+        ".github/workflows/ci.yml": caller_workflow(owner, private=True),
         "README.md": (f"# {name}\n\nFixture Go library. Depends on `{deps_mod}`"
                       + (", " + ", ".join(f"`github.com/{owner}/{p}`" for p in prev) if prev else "")
                       + ".\n"),
@@ -149,6 +175,7 @@ def standalone_files(owner, name):
         "main.go": ("// Command " + name + " uses public modules only: no dependencies on other " + owner + " repos.\n"
                     "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/google/uuid\"\n\t\"golang.org/x/text/language\"\n)\n\n"
                     "func main() {\n\tfmt.Println(\"" + name + "\", uuid.NewString(), language.Make(\"en-US\").String())\n}\n"),
+        ".github/workflows/ci.yml": caller_workflow(owner, private=False),
         "README.md": (f"# {name}\n\nGo module with public dependencies only "
                       f"({', '.join(m for m, _ in PUBLIC_DEPS)}), no cross-org dependencies.\n"),
         MARKER: "created by go-deps-fixtures\n",
@@ -188,7 +215,7 @@ def parse_items(a):
         sys.exit(f"Not valid new repo names: {bad}")
     if len(set(names)) != len(names):
         sys.exit("Repo names must be different from each other.")
-    total = count or 5
+    total = count or 2
     if not names and not 1 <= total <= MAX_COUNT:
         sys.exit(f"Number of repos must be 1..{MAX_COUNT}")
     return lang, total, names
@@ -302,6 +329,7 @@ def push_repo(plan, r, author, env, has_go, delay):
     work = tempfile.mkdtemp(prefix=f"{name}-")
     try:
         for path, text in r["files"].items():
+            os.makedirs(os.path.dirname(os.path.join(work, path)), exist_ok=True)
             with open(os.path.join(work, path), "w") as f:
                 f.write(text)
         if has_go and r.get("requires"):
@@ -378,6 +406,34 @@ def cmd_create(a):
     print("Done.")
 
 
+def cmd_add_caller(a):
+    """Add .github/workflows/ci.yml to existing Go repos made by this script (skips ones that have it)."""
+    owner, env, author = a.owner, git_env(a.owner), identity()
+    for name in a.repos:
+        if gh_api(f"repos/{owner}/{name}/contents/.github/workflows/ci.yml"):
+            print(f"  skip    {name}: already has .github/workflows/ci.yml"); continue
+        gm = gh_api(f"repos/{owner}/{name}/contents/go.mod")
+        if not gm:
+            print(f"  skip    {name}: no go.mod"); continue
+        text = base64.b64decode(gm["content"]).decode(errors="replace")
+        private = f"github.com/{owner.lower()}/" in text.split("\n", 1)[-1].lower()
+        if not a.apply:
+            print(f"  would add ci.yml to {name}" + (" (private modules)" if private else "")); continue
+        work = tempfile.mkdtemp(prefix=f"{name}-")
+        try:
+            run(["git", "clone", "-q", "--depth", "1", f"https://github.com/{owner}/{name}.git", work], env=env)
+            os.makedirs(os.path.join(work, ".github", "workflows"), exist_ok=True)
+            with open(os.path.join(work, ".github", "workflows", "ci.yml"), "w") as f:
+                f.write(caller_workflow(owner, private))
+            g = git_cmd(author)
+            run(g + ["add", ".github/workflows/ci.yml"], cwd=work)
+            run(g + ["commit", "-q", "-m", "Add CI workflow calling brightsheets/reusable-workflows"], cwd=work)
+            run(["git", "push", "-q", "origin", "HEAD"], cwd=work, env=env)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        print(f"  added   https://github.com/{owner}/{name}/blob/main/.github/workflows/ci.yml")
+
+
 def cmd_list(a):
     r = run(["gh", "repo", "list", a.owner, "--limit", "4000", "--json", "name,visibility,url,repositoryTopics"])
     rows = [x for x in json.loads(r.stdout or "[]")
@@ -392,7 +448,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in (("plan", cmd_plan), ("create", cmd_create)):
         p = sub.add_parser(name)
-        p.add_argument("items", nargs="*", help="[go|node|java] then a number of repos (default 5) or repo names")
+        p.add_argument("items", nargs="*", help="[go|node|java] then a number of repos (default 2) or repo names")
         p.add_argument("--lang", help="go (default), node or java")
         p.add_argument("--count", type=int, help=f"number of repos, 1..{MAX_COUNT} (same as giving a number)")
         p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
@@ -405,6 +461,10 @@ def main():
         if name == "create":
             p.add_argument("--apply", action="store_true", help="actually create (default is dry run)")
         p.set_defaults(fn=fn)
+    p = sub.add_parser("add-caller", help="add the CI caller workflow to existing Go repos")
+    p.add_argument("repos", nargs="+"); p.add_argument("--apply", action="store_true")
+    p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
+    p.set_defaults(fn=cmd_add_caller)
     p = sub.add_parser("list"); p.add_argument("--owner", default=os.environ.get("FIXTURE_OWNER", "brightsheets"))
     p.set_defaults(fn=cmd_list)
     a = ap.parse_args()
