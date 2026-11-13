@@ -132,16 +132,16 @@ It's read-only except for one thing: if the Snyk MCP server is missing and the s
 | `app` | That Snyk org has no GitHub Cloud App integration | Give the user the link it prints and ask them to click Install on GitHub. Offer to wait: rerun with `--wait` (polls every 10 s, up to `--wait-minutes`, default 10) and continue as soon as the install shows up. Installing a GitHub App always needs that one click by the account or org owner; it can't be automated. |
 | `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the Snyk MCP server line: the check adds it automatically once the snyk CLI is installed; when it reports *Added*, tell the user to run `/mcp` or restart Claude Code to load the `mcp__snyk__*` tools. |
 
-**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is fine-grained, or lacks a scope): without it the plugin can't add repos to the Snyk GitHub App, so PR checks and fix PRs won't work for repos outside the app's access. Ask with AskUserQuestion: "Set GH_APP_ADMIN_TOKEN so I can add repos to the Snyk app?" Options: *Yes, show me how (Recommended)*, *Skip, I'll add repos by hand*. On yes, show exactly what the check printed, as:
-1. **Permissions:** a classic token (`ghp_…`); `repo` scope for a personal account, `repo` + `admin:org` for an organization (and authorize it for the org's SSO); the account owner's (personal) or an org owner's / Snyk app manager's (org); nothing else ticked; short expiry. Include the create link.
-2. **Export command**, to run in their own terminal, then start Claude Code from that terminal (`claude --continue` resumes the conversation):
+**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is fine-grained, or lacks a scope): **don't ask, just show it and carry on.** Show, from what the check printed:
+1. **Permissions:** a classic token (`ghp_…`); `repo` scope for a personal account, `repo` + `admin:org` for an organization (authorized for the org's SSO if it uses one); the account owner's (personal) or an org owner's / Snyk app manager's (org); nothing else ticked; short expiry; the create link.
+2. **Export command**, to run in their own terminal before starting Claude Code from it (`claude --continue` resumes the conversation):
    ```
    read -rs -p "GH_APP_ADMIN_TOKEN: " GH_APP_ADMIN_TOKEN && echo && export GH_APP_ADMIN_TOKEN
    claude --continue
    ```
-   Mention in one line that exporting with `!` inside Claude Code doesn't reach later commands, and that `set_env_token.sh` saves it to settings instead if they want it permanent.
+   One line: exporting with `!` inside Claude Code doesn't reach later commands; `set_env_token.sh` saves it to settings instead.
 
-Then stop and wait for them to come back. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it. On skip, continue; after the import, give the manual link (`github.com/settings/installations` → Snyk → Configure → Repository access, or the org's installations page).
+Then continue with step 1. The import still runs; repos just aren't added to the Snyk app by this run, so the report lists them with the manual link (`github.com/settings/installations` → Snyk → Configure → Repository access, or the org's installations page) and says a rerun with the token adds them. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
 
 If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
 
