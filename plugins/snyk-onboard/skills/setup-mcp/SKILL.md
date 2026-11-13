@@ -59,7 +59,7 @@ allowed-tools: >-
 
 5. **Finish.** Tell the user to run `/mcp` (or restart Claude Code) so the tools load, then authenticate with `snyk auth` (or the `snyk_auth` MCP tool once it's loaded).
 
-If the user picks *Skip*, say the onboard skill still works with the `snyk` CLI and its scripts.
+If the user picks *Skip*, say `/snyk-onboard` still works with the `snyk` CLI and its scripts.
 
 ## Rules
 - Never install without an explicit yes, and add nothing but the `snyk` server.

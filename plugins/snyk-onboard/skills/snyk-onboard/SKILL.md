@@ -1,7 +1,7 @@
 ---
-name: onboard
+name: snyk-onboard
 description: >-
-  Onboard a GitHub repo, or every repo in a GitHub org, to Snyk: detect each repo's tech stack,
+  Onboard one GitHub repo, several repos, or every repo in a GitHub org, to Snyk: detect each repo's tech stack,
   choose the Snyk products that fit (Open Source, Code, Container, IaC, unmanaged C/C++), import the
   repos into a Snyk org through its GitHub integration, and open a PR per repo adding a .snyk policy
   and a GitHub Actions workflow built for that stack. Use when the user asks to onboard, add, enable,
@@ -9,7 +9,7 @@ description: >-
   repos in an org are not on Snyk yet; or to say which Snyk products a repo needs. Checks for the Snyk
   MCP server first and asks to install it when it is missing. Plans first and writes nothing (no Snyk
   imports, branches, pushes, PRs or secrets) until the user approves. Supports --dry-run.
-argument-hint: "[--dry-run] <owner/repo | path | --org <github-org>> [--snyk-org <id>] [--filter <regex>] [--severity high] [--no-ci]"
+argument-hint: "<repo> [repo ...] | --org <github-org>  [--dry-run] [--snyk-org <id>] [--severity high] [--no-ci]"
 allowed-tools: >-
   Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent,
   Bash(python3:*), Bash(bash:*), Bash(gh auth status:*), Bash(gh api:*), Bash(gh repo list:*),
@@ -58,11 +58,15 @@ allowed-tools: >-
 
 # Onboard repos to Snyk
 
+**Usage:** `/snyk-onboard <repo> [repo ...] [--dry-run]`, e.g. `/snyk-onboard go-lib-01 go-lib-02 --dry-run`. A bare repo name means `brightsheets/<name>`.
+
+If no arguments were given, reply with that usage line and the arguments table below, then stop.
+
 ## Arguments
 
 | Argument | Meaning |
 |---|---|
-| `owner/repo` | One GitHub repo, read through the GitHub API (no clone needed to plan). |
+| `<repo> [repo ...]` | One or more GitHub repos, separated by spaces or commas. Each is `owner/repo`, or a bare name for `brightsheets/<name>`. Read through the GitHub API (no clone needed to plan). |
 | `path` | A local checkout. |
 | `--org <github-org>` | Every repo in the org. Archived repos, forks and empty repos are skipped. |
 | `--snyk-org <id\|slug>` | Snyk org to import into. If missing, it's looked up from the repo's GitHub owner in `references/snyk-orgs.json`; if the owner isn't there, the default org `brightsheets` is used (override with `SNYK_ORG`). |
@@ -109,7 +113,7 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 3. Snyk credentials: `SNYK_TOKEN` is set, or `snyk whoami --experimental` succeeds (OAuth login). Never print a token's value. If neither works, stop and explain how to set one.
 
 ### 1. Detect
-- **One repo:** `python3 scripts/detect_stack.py --github owner/repo` (or `--path`).
+- **One or more repos:** `python3 scripts/detect_stack.py --github owner/repo` (or `--path`) for each repo. Expand bare names to `brightsheets/<name>` first.
 - **Org:** `python3 scripts/scan_org.py --org <org> [--filter …] --out snyk-onboarding-plan-<org>.json`.
 
 Skip any repo where `already_onboarded.snyk_in_github_actions` is true unless the user asks to include it. Also skip repos with an empty `snyk_products`, and record them as "no supported stack".
@@ -159,7 +163,7 @@ Every failure comes with recommendations. Examples:
 The run ends with a summary and the recommendations grouped by repo count. It exits non-zero if any repo failed.
 
 Steps:
-1. For each approved wave, run `snyk_import.py import (--repo … | --plan …) [--org-id …] --skip-onboarded` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
+1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --plan …) [--org-id …] --skip-onboarded` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
 2. Tell the user in the plan that `--apply` will both add repos to the Snyk GitHub App installation and import them. Run with `--apply` only after they confirm that wave. Pass `--no-grant-app` if they want imports only. If a Go import fails on private modules, ask before rerunning with `--fix-deps`: it grants the app access to more repos than the ones in the plan.
 3. Show the summary and every recommendation. Don't retry a failed repo until the cause is fixed. Keep `snyk-import-log.json` for the report.
 

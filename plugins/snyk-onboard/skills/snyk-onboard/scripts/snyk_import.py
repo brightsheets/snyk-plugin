@@ -16,7 +16,8 @@ Usage:
   snyk_import.py integrations --org-id <uuid>           # one org's integrations (live)
   snyk_import.py resolve --repo owner/name              # which Snyk org + integration a repo maps to
   snyk_import.py refresh-orgs [--out <file>]            # rebuild references/snyk-orgs.json from Snyk
-  snyk_import.py import --repo owner/name [--branch b] [--org-id <uuid|slug>] [--apply]
+  snyk_import.py import --repo owner/name [repo2 ...] [--branch b] [--org-id <uuid|slug>] [--apply]
+                                                        # a bare name means $GITHUB_OWNER/name (default brightsheets)
   snyk_import.py import --plan snyk-onboarding-plan.json [--org-id <uuid|slug>] [--apply]
 
 Env:
@@ -32,6 +33,16 @@ import urllib.error, urllib.parse, urllib.request
 API = os.environ.get("SNYK_API", "https://api.snyk.io").rstrip("/")
 REST_VERSION = "2024-10-15"
 DEFAULT_ORG = os.environ.get("SNYK_ORG", "brightsheets")  # https://app.snyk.io/org/brightsheets
+DEFAULT_OWNER = os.environ.get("GITHUB_OWNER", "brightsheets")
+
+
+def split_repos(values):
+    """['a', 'o/b,c'] -> ['brightsheets/a', 'o/b', 'brightsheets/c']"""
+    out = []
+    for v in values or []:
+        for r in filter(None, (x.strip() for x in v.split(","))):
+            out.append(r if "/" in r else f"{DEFAULT_OWNER}/{r}")
+    return out
 SCM_TYPES = ["github-cloud-app", "github", "github-enterprise"]  # preference order; never cli/ecr/etc.
 DEFAULT_EXCLUDES = "fixtures, tests, __tests__, node_modules, vendor, third_party, Intermediate, Binaries, Library"
 MAPPING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "snyk-orgs.json")
@@ -402,6 +413,7 @@ def cmd_integrations(a):
 
 
 def cmd_resolve(a):
+    a.repo = split_repos([a.repo])[0]
     owner = a.repo.split("/", 1)[0]
     org, itype, iid, why = resolve(load_mapping(), owner, a.org_id, a.integration)
     print(json.dumps({"repo": a.repo, "snyk_org": org and org["slug"], "snyk_org_id": org and org["id"],
@@ -451,8 +463,8 @@ def cmd_import(a):
         if a.skip_onboarded:
             targets = [t for t in targets if not t["already_onboarded"]["snyk_in_github_actions"]]
     elif a.repo:
-        owner, name = a.repo.split("/", 1)
-        targets = [{"owner": owner, "name": name, "branch": a.branch}]
+        targets = [{"owner": r.split("/", 1)[0], "name": r.split("/", 1)[1], "branch": a.branch}
+                   for r in split_repos(a.repo)]
     else:
         sys.exit("Pass --plan or --repo")
 
@@ -606,7 +618,8 @@ def main():
     p = sub.add_parser("import")
     p.add_argument("--org-id", help="Snyk org id or slug; default: resolved per repo from the mapping, else SNYK_ORG (brightsheets)")
     p.add_argument("--integration", choices=SCM_TYPES, help="force an integration type")
-    p.add_argument("--plan"); p.add_argument("--repo"); p.add_argument("--branch")
+    p.add_argument("--plan"); p.add_argument("--branch")
+    p.add_argument("--repo", nargs="+", help="one or more repos: owner/name or bare name (owner brightsheets), space or comma separated")
     p.add_argument("--exclude", default=DEFAULT_EXCLUDES)
     p.add_argument("--skip-onboarded", action="store_true")
     p.add_argument("--delay", type=float, default=1.0)

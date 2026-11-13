@@ -1,12 +1,12 @@
 ---
-name: create
+name: create-repo
 description: >-
   Create a batch of GitHub repos whose go.mod files depend on a shared module repo (default
   brightsheets/deps-01) and on each other, plus one repo with no dependencies. Use when the user
   wants Go module test repos, cross-repo go.mod dependencies, fixtures for testing Snyk (or other)
   Go dependency scanning, or to seed deps-01. Plans first and creates nothing until the user
   approves. Supports --dry-run.
-argument-hint: "[--dry-run] [--count 10] [--owner brightsheets] [--deps deps-01] [--public]"
+argument-hint: "[count] [--dry-run] [--public] [--prefix go-lib] [--owner brightsheets]"
 allowed-tools: >-
   AskUserQuestion, Bash(python3:*), Bash(gh auth status:*), Bash(command -v:*)
 ---
@@ -27,7 +27,11 @@ allowed-tools: >-
   It never overwrites, force-pushes or deletes anything.
 -->
 
-# Create Go module fixture repos
+# Create Go module repos
+
+**Usage:** `/create-repo [count] [--dry-run]`, e.g. `/create-repo 5 --dry-run`. Creates in `brightsheets`. Each lib gets its `go.mod` and `go.sum`, depends on `deps-01` and the libs before it, and one `go-standalone` repo has no deps.
+
+A bare number is the count (default 10). If the user only asks how to use it, reply with the usage line and stop.
 
 Script: `scripts/make_go_repos.py` (run it from this skill's folder).
 
@@ -43,7 +47,7 @@ Script: `scripts/make_go_repos.py` (run it from this skill's folder).
 
 | Argument | Meaning |
 |---|---|
-| `--count N` | Number of cross-dependent libs, 1–100. Default 10. |
+| `count` or `--count N` | Number of cross-dependent libs, 1–100. Default 10. Pass it to the script as `--count N`. |
 | `--owner` | GitHub user or org. Default `brightsheets`. |
 | `--deps` | Shared module repo. Default `deps-01`. It must already exist; it may be empty. |
 | `--prefix` / `--standalone` | Repo names. Defaults `go-lib`, `go-standalone`. |
@@ -62,7 +66,7 @@ Script: `scripts/make_go_repos.py` (run it from this skill's folder).
 ## Using them with snyk-onboard
 
 The libs are meant to test Go cross-repo dependencies, for example
-`/snyk-onboard:onboard --org brightsheets --filter 'go-lib|go-standalone' --dry-run`.
+`/snyk-onboard go-lib-01 go-lib-02 go-standalone --dry-run`.
 With private repos and the Snyk GitHub App limited to selected repos, a lib's import can fail
 until its dependency repos are also granted. `snyk_import.py import --fix-deps` handles that.
 `go-standalone` is the control: it should import cleanly with no dependency findings.
