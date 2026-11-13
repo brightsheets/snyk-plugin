@@ -153,6 +153,14 @@ def stage_app(orgs):
             ints = ints if status == 200 and isinstance(ints, dict) else {}
             if ints.get("github-cloud-app"):
                 report("app", True, f"Snyk org {label} has the GitHub Cloud App integration")
+                if not os.environ.get("GH_APP_ADMIN_TOKEN"):
+                    who = (f"a classic PAT of {owner} with the repo scope (github.com/settings/tokens/new?scopes=repo)"
+                           if owner_is_user(owner) else
+                           f"a classic PAT (repo + admin:org) of an owner of {owner} or a Snyk app manager")
+                    report("app", False, f"GH_APP_ADMIN_TOKEN isn't set, so repos can't be added to the Snyk app "
+                           f"for {owner} automatically (needed when the app has 'selected repositories' access).",
+                           f"Set GH_APP_ADMIN_TOKEN to {who}, e.g. in ~/.claude/settings.json -> \"env\", and restart.",
+                           blocking=False)
                 break
             if time.time() >= deadline:
                 other = [t for t in ("github", "github-enterprise") if ints.get(t)]

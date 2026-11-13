@@ -241,9 +241,27 @@ def snyk_app_installation(owner):
     token = os.environ.get("GH_APP_ADMIN_TOKEN")
     ostatus, odata = gh("GET", f"users/{owner}", token)
     if ostatus == 200 and (odata or {}).get("type") == "User":
-        # Personal accounts: GitHub has no endpoint that lists a user's app installations with a PAT
-        # (only with the app's own user token), so access can't be checked ahead of time.
+        # Personal accounts: a classic PAT of the account owner (GH_APP_ADMIN_TOKEN, repo scope) can list
+        # the account's app installations and add repos to them; gh's own OAuth token can't.
+        # SNYK_GH_INSTALLATION_ID (the number in github.com/settings/installations/<id>) skips the lookup.
         res = {"state": "personal", "settings_url": "https://github.com/settings/installations"}
+        inst_id = os.environ.get("SNYK_GH_INSTALLATION_ID")
+        if token:
+            st, data = gh("GET", "user/installations?per_page=100", token)
+            if st == 200:
+                hits = [i for i in data.get("installations", [])
+                        if "snyk" in i.get("app_slug", "").lower()
+                        and (i.get("account") or {}).get("login", "").lower() == owner.lower()]
+                res = ({"state": "found", "id": hits[0]["id"], "app_slug": hits[0]["app_slug"],
+                        "selection": hits[0].get("repository_selection"),
+                        "settings_url": f"https://github.com/settings/installations/{hits[0]['id']}"}
+                       if hits else {"state": "not-installed"})
+            elif inst_id:
+                res = {"state": "found", "id": int(inst_id), "app_slug": "snyk", "selection": "selected",
+                       "settings_url": f"https://github.com/settings/installations/{inst_id}"}
+            else:
+                res = {"state": "unknown", "status": st,
+                       "detail": ((data or {}).get("message") or "").splitlines()[0][:160] if (data or {}).get("message") else ""}
         _INSTALL_CACHE[owner] = res
         return res
     status, data = gh("GET", f"orgs/{owner}/installations?per_page=100", token)
@@ -283,8 +301,11 @@ def app_access_fixes(owner, name, detail="", settings_url=None):
     fixes += [
         f"Add {owner}/{name} to the Snyk GitHub App by hand: {url} > Snyk > Configure > Repository access "
         "(needs an org owner or Snyk app manager). Then rerun.",
-        f"Give the token elevated access: GH_APP_ADMIN_TOKEN must be a classic PAT (repo + admin:org scopes) of an "
-        f"owner of {owner} or a manager of the Snyk app, SSO-authorized for {owner}. GitHub refuses gh's own token here.",
+        (f"Give the token elevated access: GH_APP_ADMIN_TOKEN must be a classic PAT (repo + admin:org scopes) of an "
+         f"owner of {owner} or a manager of the Snyk app, SSO-authorized for {owner}. GitHub refuses gh's own token here."
+         if "organizations/" in url else
+         f"Give the token access: GH_APP_ADMIN_TOKEN must be a classic PAT of {owner} with the repo scope "
+         "(github.com/settings/tokens/new?scopes=repo). GitHub refuses gh's own token here."),
         "If the repo is already in the app's access, rerun with --no-grant-app to skip this check.",
     ]
     return fixes
@@ -323,11 +344,17 @@ def ensure_app_access(owner, name, apply):
     inst = snyk_app_installation(owner)
     recs = []
     if inst["state"] == "personal":
-        return {"state": "personal", "blocking": False,
-                "detail": (f"{owner} is a personal account: GitHub doesn't let a token list its app installations, "
-                           "so the Snyk import itself checks the app's access"),
-                "recommendations": [f"If the import fails with 'not found', add {name} to the Snyk app: "
-                                    f"{inst['settings_url']} > Snyk > Configure > Repository access."]}
+        public = (gh("GET", f"repos/{owner}/{name}")[1] or {}).get("private") is False
+        return {"state": "personal-unverified", "blocking": False,
+                "detail": (f"{owner} is a personal account and GH_APP_ADMIN_TOKEN isn't set, so the Snyk app's "
+                           f"access can't be checked or granted"
+                           + (f". {name} is public, so the import works without app access, but PR checks, "
+                              "fix PRs and upgrade PRs need the repo in the app" if public else "")),
+                "recommendations": [
+                    f"To let the plugin add repos to the Snyk app: set GH_APP_ADMIN_TOKEN to a classic PAT of {owner} "
+                    "with the repo scope (github.com/settings/tokens/new?scopes=repo), e.g. in ~/.claude/settings.json "
+                    "-> env, then rerun.",
+                    f"Or add {name} by hand: {inst['settings_url']} > Snyk > Configure > Repository access."]}
     if inst["state"] == "unknown":
         detail = inst.get("detail", "")
         return {"state": "unknown", "blocking": True,

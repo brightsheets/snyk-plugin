@@ -38,9 +38,10 @@ allowed-tools: >-
      -> Snyk org -> integration lookup is in references/snyk-orgs.json;
      refresh it with `scripts/snyk_import.py refresh-orgs`.
   4. To add repos to a selected-repos Snyk GitHub App installation:
-     GH_APP_ADMIN_TOKEN, a classic PAT (repo scope, SSO-authorized) of an org
-     owner or Snyk app manager. Without it the script tells you what to add by
-     hand.
+     GH_APP_ADMIN_TOKEN, a classic PAT. For an org: repo + admin:org scopes,
+     SSO-authorized, of an org owner or Snyk app manager. For a personal
+     account: repo scope, of that account. Without it the script tells you
+     what to add by hand.
   5. Python 3.9+. Optional: the snyk CLI and the Snyk MCP server (the
      setup-mcp skill installs the MCP server after asking).
 
@@ -163,7 +164,7 @@ Pass every entry in detection's `notes` on to the user. For example:
 ### 4. Import into Snyk
 The importer does two things for each repo, in this order:
 
-1. **GitHub side.** For `github-cloud-app` imports, it checks the Snyk GitHub App's installation on the repo's GitHub org. If the app is limited to *selected repositories*, it adds the repo to the installation. This needs `GH_APP_ADMIN_TOKEN`: a classic PAT with `repo` scope and SSO authorization, belonging to an org owner or a manager of the Snyk app. GitHub refuses `gh`'s own token for these endpoints. If the script can't confirm or grant the app's access (no token, token not SSO-authorized, not an org owner or app manager), the repo is **not imported** and the output recommends fixes: authorize the token for SSO, add the repo to the app by hand, or use an owner's token. Pass `--no-grant-app` to skip the check when the repo is already in the app. If the app isn't installed on the GitHub org at all, the repo is not imported, and the output says how to install the app.
+1. **GitHub side.** For `github-cloud-app` imports, it checks the Snyk GitHub App's installation on the repo's GitHub org or personal account (for a personal account it needs `GH_APP_ADMIN_TOKEN` set to that account's classic PAT with the `repo` scope; without it, the repo is imported if Snyk can read it, which for a **public** repo works even without app access, but PR checks and fix PRs then don't, so tell the user to add the token or the repo by hand). If the app is limited to *selected repositories*, it adds the repo to the installation. This needs `GH_APP_ADMIN_TOKEN`: a classic PAT with `repo` scope and SSO authorization, belonging to an org owner or a manager of the Snyk app. GitHub refuses `gh`'s own token for these endpoints. If the script can't confirm or grant the app's access (no token, token not SSO-authorized, not an org owner or app manager), the repo is **not imported** and the output recommends fixes: authorize the token for SSO, add the repo to the app by hand, or use an owner's token. Pass `--no-grant-app` to skip the check when the repo is already in the app. If the app isn't installed on the GitHub org at all, the repo is not imported, and the output says how to install the app.
 2. **Snyk side.** It imports the repo through the Snyk org's integration. Then it waits for the Snyk job (up to `--wait-timeout`, default 300s) and prints each project it created, or the error for each one that failed.
 
 Every failure comes with recommendations. Examples:
