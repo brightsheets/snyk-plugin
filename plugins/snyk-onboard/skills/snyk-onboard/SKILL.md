@@ -59,6 +59,13 @@ allowed-tools: >-
 
 # Onboard repos to Snyk
 
+**Every run starts fresh.** Treat each `/snyk-onboard` invocation as a brand-new request, even if the conversation already onboarded the same repos:
+- Use the newest installed copy of this plugin. If the base directory above isn't the highest version under `~/.claude/plugins/cache/keezconsign/snyk-onboard/`, run every script from the highest one instead and say so in one line (the session may have loaded an older copy; `/reload-plugins` or a restart fixes that).
+- Run every step below again, live: setup check, detection, Snyk org and integration, existing Snyk projects, app access. Don't reuse results, plans, approvals or answers from earlier in the conversation, and don't describe Snyk's or GitHub's state from memory; report only what this run's commands returned.
+- Ask every question again (tokens, import approval, settings, CI PR). An earlier "yes" doesn't carry over.
+- Environment variables (`GH_APP_ADMIN_TOKEN`, `SNYK_TOKEN`) are read from this session as it is now.
+
+
 **Usage:** `/snyk-onboard <repo> [repo ...] [--dry-run]`, e.g. `/snyk-onboard snyk-demo-go-1 snyk-demo-go-2 --dry-run`, or from a file: `/snyk-onboard --file repos.txt --dry-run`. A bare repo name means `brightsheets/<name>`.
 
 If no arguments were given, reply with that usage line and the arguments table below, then stop.
