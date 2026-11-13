@@ -1,0 +1,17 @@
+# Snyk (https://snyk.io) policy file
+version: v1.25.0
+ignore: {}
+patch: {}
+exclude:
+  global:
+    - "**/node_modules/**"
+    - "**/vendor/**"
+    - "**/third_party/**"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/fixtures/**"
+    # Game-engine build output
+    - "**/Intermediate/**"
+    - "**/Binaries/**"
+    - "**/Library/**"
+    - "**/Temp/**"
