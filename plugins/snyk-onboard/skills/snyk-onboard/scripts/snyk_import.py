@@ -290,6 +290,11 @@ def app_access_fixes(owner, name, detail="", settings_url=None):
     return fixes
 
 
+def default_branch(owner, name):
+    status, data = gh("GET", f"repos/{owner}/{name}")
+    return (data or {}).get("default_branch") if status == 200 else None
+
+
 def ensure_app_access(owner, name, apply):
     """For github-cloud-app imports: make sure the Snyk app can see owner/name.
 
@@ -563,10 +568,12 @@ def cmd_import(a):
 
             # 2. Snyk side: import
             target = {"owner": t["owner"], "name": t["name"]}
-            if t.get("branch"):
-                target["branch"] = t["branch"]
+            # The GitHub Cloud App import requires a branch; default to the repo's default branch.
+            branch = t.get("branch") or default_branch(t["owner"], t["name"])
+            if branch:
+                target["branch"] = branch
             if not a.apply:
-                print(f"     would import {repo}@{t.get('branch') or 'default'}")
+                print(f"     would import {repo}@{target.get('branch') or 'default branch (unknown)'}")
                 rec["result"] = "dry-run"
                 continue
             status, headers, resp = call("POST", f"/v1/org/{org_id}/integrations/{iid}/import",
