@@ -18,6 +18,8 @@ Usage:
   snyk_import.py refresh-orgs [--out <file>]            # rebuild references/snyk-orgs.json from Snyk
   snyk_import.py import --repo owner/name [repo2 ...] [--branch b] [--org-id <uuid|slug>] [--apply]
                                                         # a bare name means $GITHUB_OWNER/name (default brightsheets)
+  snyk_import.py import --file repos.txt [--apply]      # or --repo @repos.txt: one repo per line, '#' comments
+  snyk_import.py repos --file repos.txt                 # just print the expanded list
   snyk_import.py import --plan snyk-onboarding-plan.json [--org-id <uuid|slug>] [--apply]
 
 Env:
@@ -36,12 +38,31 @@ DEFAULT_ORG = os.environ.get("SNYK_ORG", "brightsheets")  # https://app.snyk.io/
 DEFAULT_OWNER = os.environ.get("GITHUB_OWNER", "brightsheets")
 
 
-def split_repos(values):
-    """['a', 'o/b,c'] -> ['brightsheets/a', 'o/b', 'brightsheets/c']"""
-    out = []
+def read_repo_file(path):
+    """Repo names from a file: one per line or comma separated; '#' starts a comment."""
+    try:
+        text = open(os.path.expanduser(path)).read()
+    except OSError as e:
+        sys.exit(f"Can't read repo file {path}: {e.strerror}")
+    return [line.split("#", 1)[0] for line in text.splitlines()]
+
+
+def split_repos(values, files=()):
+    """['a', 'o/b,c', '@list.txt'] -> ['brightsheets/a', 'o/b', 'brightsheets/c', ...], duplicates dropped."""
+    raw = []
     for v in values or []:
+        raw += read_repo_file(v[1:]) if v.startswith("@") else [v]
+    for f in files or []:
+        raw += read_repo_file(f)
+    out = []
+    for v in raw:
         for r in filter(None, (x.strip() for x in v.split(","))):
-            out.append(r if "/" in r else f"{DEFAULT_OWNER}/{r}")
+            r = r.removeprefix("https://github.com/").removesuffix(".git").strip("/")
+            r = r if "/" in r else f"{DEFAULT_OWNER}/{r}"
+            if r.count("/") != 1:
+                sys.exit(f"Not a repo name: {r!r} (use owner/name or a bare name)")
+            if r not in out:
+                out.append(r)
     return out
 SCM_TYPES = ["github-cloud-app", "github", "github-enterprise"]  # preference order; never cli/ecr/etc.
 DEFAULT_EXCLUDES = "fixtures, tests, __tests__, node_modules, vendor, third_party, Intermediate, Binaries, Library"
@@ -462,11 +483,14 @@ def cmd_import(a):
         targets = plan["targets"]
         if a.skip_onboarded:
             targets = [t for t in targets if not t["already_onboarded"]["snyk_in_github_actions"]]
-    elif a.repo:
+    elif a.repo or a.file:
+        repos = split_repos(a.repo, a.file)
+        if not repos:
+            sys.exit("No repos given (the file was empty?)")
         targets = [{"owner": r.split("/", 1)[0], "name": r.split("/", 1)[1], "branch": a.branch}
-                   for r in split_repos(a.repo)]
+                   for r in repos]
     else:
-        sys.exit("Pass --plan or --repo")
+        sys.exit("Pass --plan, --repo or --file")
 
     mapping = load_mapping()
     groups, unresolved = collections.OrderedDict(), []
@@ -619,7 +643,8 @@ def main():
     p.add_argument("--org-id", help="Snyk org id or slug; default: resolved per repo from the mapping, else SNYK_ORG (brightsheets)")
     p.add_argument("--integration", choices=SCM_TYPES, help="force an integration type")
     p.add_argument("--plan"); p.add_argument("--branch")
-    p.add_argument("--repo", nargs="+", help="one or more repos: owner/name or bare name (owner brightsheets), space or comma separated")
+    p.add_argument("--repo", nargs="+", help="one or more repos: owner/name or bare name (owner brightsheets), space or comma separated; @file reads a list")
+    p.add_argument("--file", action="append", help="file of repo names, one per line or comma separated, '#' comments")
     p.add_argument("--exclude", default=DEFAULT_EXCLUDES)
     p.add_argument("--skip-onboarded", action="store_true")
     p.add_argument("--delay", type=float, default=1.0)
@@ -633,6 +658,9 @@ def main():
     p.add_argument("--apply", action="store_true",
                    help="actually import, and add repos to the Snyk GitHub App (default is dry run)")
     p.set_defaults(fn=cmd_import)
+    p = sub.add_parser("repos", help="print the expanded repo list, one per line")
+    p.add_argument("--repo", nargs="*"); p.add_argument("--file", action="append")
+    p.set_defaults(fn=lambda a: print("\n".join(split_repos(a.repo, a.file))))
     a = ap.parse_args()
     a.fn(a)
 
