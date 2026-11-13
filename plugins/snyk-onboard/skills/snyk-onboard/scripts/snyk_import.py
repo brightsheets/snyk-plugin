@@ -239,6 +239,13 @@ def snyk_app_installation(owner):
     if owner in _INSTALL_CACHE:
         return _INSTALL_CACHE[owner]
     token = os.environ.get("GH_APP_ADMIN_TOKEN")
+    ostatus, odata = gh("GET", f"users/{owner}", token)
+    if ostatus == 200 and (odata or {}).get("type") == "User":
+        # Personal accounts: GitHub has no endpoint that lists a user's app installations with a PAT
+        # (only with the app's own user token), so access can't be checked ahead of time.
+        res = {"state": "personal", "settings_url": "https://github.com/settings/installations"}
+        _INSTALL_CACHE[owner] = res
+        return res
     status, data = gh("GET", f"orgs/{owner}/installations?per_page=100", token)
     if status != 200:
         res = {"state": "unknown", "status": status, "detail": ((data or {}).get("message", "") or "").splitlines()[0][:160] if (data or {}).get("message") else ""}
@@ -267,7 +274,8 @@ def highlight(msg):
 
 def app_access_fixes(owner, name, detail="", settings_url=None):
     """Fixes for when the script can't confirm or grant the Snyk app's access to owner/name."""
-    url = settings_url or f"https://github.com/organizations/{owner}/settings/installations"
+    url = settings_url or (f"https://github.com/organizations/{owner}/settings/installations"
+                           if gh("GET", f"orgs/{owner}")[0] == 200 else "https://github.com/settings/installations")
     fixes = []
     if "SAML" in detail or "SSO" in detail:
         fixes.append(f"Authorize GH_APP_ADMIN_TOKEN for {owner}'s SSO: github.com/settings/tokens > the token > "
@@ -289,6 +297,12 @@ def ensure_app_access(owner, name, apply):
     """
     inst = snyk_app_installation(owner)
     recs = []
+    if inst["state"] == "personal":
+        return {"state": "personal", "blocking": False,
+                "detail": (f"{owner} is a personal account: GitHub doesn't let a token list its app installations, "
+                           "so the Snyk import itself checks the app's access"),
+                "recommendations": [f"If the import fails with 'not found', add {name} to the Snyk app: "
+                                    f"{inst['settings_url']} > Snyk > Configure > Repository access."]}
     if inst["state"] == "unknown":
         detail = inst.get("detail", "")
         return {"state": "unknown", "blocking": True,
