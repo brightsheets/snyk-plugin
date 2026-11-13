@@ -251,10 +251,9 @@ def build_plan(a):
     else:
         deps_mod = f"github.com/{owner}/{a.deps}"
         ds = repo_state(owner, a.deps)
-        if ds is None:
-            sys.exit(f"{owner}/{a.deps} does not exist. Create it first (it can be empty).")
-        if ds["empty"]:
-            plan["repos"].append({"name": a.deps, "kind": "deps", "action": "seed", "files": deps_files(owner, a.deps)})
+        if ds is None or ds["empty"]:  # missing: create it (public) and seed it; empty: just seed it
+            plan["repos"].append({"name": a.deps, "kind": "deps", "action": "create" if ds is None else "seed",
+                                  "visibility": "public", "files": deps_files(owner, a.deps)})
             deps_ver, deps_callable = a.version, True
         else:
             if ds["module"] and ds["module"] != deps_mod:
@@ -317,7 +316,7 @@ def git_cmd(author):
 
 def create_remote(plan, r, description):
     if r["action"] == "create":
-        run(["gh", "repo", "create", f"{plan['owner']}/{r['name']}", f"--{plan['visibility']}",
+        run(["gh", "repo", "create", f"{plan['owner']}/{r['name']}", f"--{r.get('visibility', plan['visibility'])}",
              "--description", description])
 
 
