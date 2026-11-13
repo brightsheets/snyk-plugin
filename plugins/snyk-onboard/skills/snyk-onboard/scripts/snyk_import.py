@@ -508,6 +508,119 @@ def cmd_refresh(a):
     print(f"wrote {os.path.normpath(path)}", file=sys.stderr)
 
 
+# ---------- integration settings (PR checks, fix PRs) ----------
+
+PRESETS = {
+    # PR checks on dependencies and code that fail only on high/critical issues, fix PRs for new
+    # and existing vulnerabilities, and dependency upgrade PRs (5 open at most).
+    "recommended": {
+        "pullRequestTestEnabled": True,
+        "pullRequestFailOnAnyVulns": False,
+        "pullRequestFailOnlyForHighSeverity": True,
+        "pullRequestTestCodeEnabled": True,
+        "pullRequestTestCodeSeverity": "high",
+        "autoRemediationPrs": {"freshPrsEnabled": True, "backlogPrsEnabled": True},
+        "autoDepUpgradeEnabled": True,
+        "autoDepUpgradeLimit": 5,
+    },
+    # Only PR checks (no Snyk-authored PRs).
+    "checks-only": {
+        "pullRequestTestEnabled": True,
+        "pullRequestFailOnlyForHighSeverity": True,
+        "pullRequestTestCodeEnabled": True,
+        "pullRequestTestCodeSeverity": "high",
+    },
+}
+SETTING_LABELS = {
+    "pullRequestTestEnabled": "PR checks: dependencies",
+    "pullRequestFailOnAnyVulns": "PR checks fail on any vulnerability",
+    "pullRequestFailOnlyForHighSeverity": "PR checks fail only on high/critical",
+    "pullRequestTestCodeEnabled": "PR checks: code (Snyk Code)",
+    "pullRequestTestCodeSeverity": "PR code checks: severity",
+    "autoRemediationPrs.freshPrsEnabled": "Fix PRs for new vulnerabilities",
+    "autoRemediationPrs.backlogPrsEnabled": "Fix PRs for existing vulnerabilities (backlog)",
+    "autoDepUpgradeEnabled": "Dependency upgrade PRs",
+    "autoDepUpgradeLimit": "Dependency upgrade PRs: max open",
+}
+
+
+def _flat(d, prefix=""):
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            out.update(_flat(v, f"{prefix}{k}."))
+        else:
+            out[f"{prefix}{k}"] = v
+    return out
+
+
+def _parse_set(items):
+    """['autoDepUpgradeLimit=3', 'autoRemediationPrs.backlogPrsEnabled=false'] -> nested dict."""
+    out = {}
+    for item in items or []:
+        key, _, raw = item.partition("=")
+        val = {"true": True, "false": False, "null": None}.get(raw.lower(), raw)
+        if isinstance(val, str) and val.isdigit():
+            val = int(val)
+        node = out
+        parts = key.split(".")
+        for p in parts[:-1]:
+            node = node.setdefault(p, {})
+        node[parts[-1]] = val
+    return out
+
+
+def _merge(base, extra):
+    out = dict(base)
+    for k, v in extra.items():
+        out[k] = _merge(out.get(k, {}), v) if isinstance(v, dict) else v
+    return out
+
+
+def cmd_integration_settings(a):
+    """Show (and with --apply, change) the GitHub integration's PR-check and fix-PR settings."""
+    owner = split_repos([a.repo])[0].split("/")[0] if a.repo else a.github_owner
+    org, itype, iid, why = resolve(load_mapping(), owner or "", a.org_id, a.integration)
+    if not iid:
+        sys.exit(f"Can't find the Snyk org's GitHub integration: {why}")
+    path = f"/v1/org/{org['id']}/integrations/{iid}/settings"
+    status, _, current = call("GET", path)
+    if status != 200:
+        sys.exit(f"Couldn't read the integration settings (HTTP {status}): {current}")
+    wanted = _merge(PRESETS.get(a.preset, {}) if a.preset else {}, _parse_set(a.set))
+    cur, new = _flat(current), _flat(wanted)
+    keys = list(dict.fromkeys([k for k in SETTING_LABELS] + list(new)))
+    print(f"Snyk org {org['slug']}, {itype} integration {iid}")
+    print(f"  {'setting':<48} {'now':<8} {'proposed'}")
+    changed = {}
+    for k in keys:
+        if k not in cur and k not in new:
+            continue
+        now, prop = cur.get(k), new.get(k, cur.get(k))
+        mark = "  ← change" if k in new and prop != now else ""
+        if mark:
+            changed[k] = prop
+        print(f"  {SETTING_LABELS.get(k, k):<48} {str(now):<8} {str(prop)}{mark}")
+    if not changed:
+        print("Nothing to change.")
+        return
+    if not a.apply:
+        print(f"\nDry run: {len(changed)} setting(s) would change. Rerun with --apply to save them.")
+        return
+    body = {}
+    for k, v in wanted.items():  # nested objects are sent whole, merged with their current values
+        body[k] = _merge(current.get(k) or {}, v) if isinstance(v, dict) else v
+    status, _, resp = call("PUT", path, body)
+    if status not in (200, 204):
+        sys.exit(f"Snyk refused the change (HTTP {status}): {resp}")
+    status, _, after = call("GET", path)
+    after = _flat(after or {})
+    bad = [k for k, v in changed.items() if after.get(k) != v]
+    if bad:
+        sys.exit(f"Saved, but these didn't take effect: {', '.join(bad)}")
+    print(f"\nSaved {len(changed)} setting(s). They apply to every repo imported through this integration.")
+
+
 def cmd_import(a):
     if a.plan:
         plan = json.load(open(a.plan))
@@ -691,6 +804,15 @@ def main():
     p.add_argument("--apply", action="store_true",
                    help="actually import, and add repos to the Snyk GitHub App (default is dry run)")
     p.set_defaults(fn=cmd_import)
+    p = sub.add_parser("integration-settings", help="show/change PR checks and fix PRs on the GitHub integration")
+    p.add_argument("--repo", help="a repo whose GitHub owner picks the Snyk org (same-name rule)")
+    p.add_argument("--github-owner", help="GitHub owner instead of --repo")
+    p.add_argument("--org-id", help="Snyk org id or slug (overrides the same-name rule)")
+    p.add_argument("--integration", choices=SCM_TYPES)
+    p.add_argument("--preset", choices=sorted(PRESETS), help="recommended | checks-only")
+    p.add_argument("--set", action="append", help="KEY=VALUE, e.g. autoDepUpgradeLimit=3 (dotted keys for nested)")
+    p.add_argument("--apply", action="store_true", help="save the changes (default: show only)")
+    p.set_defaults(fn=cmd_integration_settings)
     p = sub.add_parser("repos", help="print the expanded repo list, one per line")
     p.add_argument("--repo", nargs="*"); p.add_argument("--file", action="append")
     p.set_defaults(fn=lambda a: print("\n".join(split_repos(a.repo, a.file))))

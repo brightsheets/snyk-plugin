@@ -67,6 +67,17 @@ Every `/snyk-onboard` run starts with a setup check (`scripts/preflight.py`). It
 
 Run it on its own: `python3 scripts/preflight.py --repo brightsheets/snyk-demo-node-1 [--wait]`. Install the CLIs by hand: `bash scripts/install_tools.sh gh snyk`.
 
+### PR checks and fix PRs
+
+After an import, `/snyk-onboard` offers to turn on the GitHub Cloud App features in that Snyk org: PR checks (dependencies and code, failing only on high/critical), fix PRs for new and existing vulnerabilities, and dependency upgrade PRs. It shows the current and proposed values and asks first. By hand:
+
+```
+python3 scripts/snyk_import.py integration-settings --repo brightsheets/snyk-demo-node-1 --preset recommended          # show
+python3 scripts/snyk_import.py integration-settings --repo brightsheets/snyk-demo-node-1 --preset recommended --apply  # save
+```
+
+Presets: `recommended`, `checks-only`; single settings with `--set key=value`. The settings apply to every repo in that Snyk org.
+
 ### Before onboarding a GitHub org
 
 | Step | Where |
