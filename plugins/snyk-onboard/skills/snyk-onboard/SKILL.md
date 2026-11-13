@@ -113,7 +113,7 @@ Run the setup check from this skill's folder with the same repos:
 ```
 python3 scripts/preflight.py --repo <owner/repo> [--repo …] [--file <path>] [--snyk-org <slug>]
 ```
-It's read-only. It walks these stages in order, stops at the first one that isn't met, prints the fix, and ends with `NEXT=<stage>` (`NEXT=ready` when everything that blocks an import is in place). Handle the stage it names, then run it again; repeat until `NEXT=ready`. Show the user its checklist each time.
+It's read-only except for one thing: if the Snyk MCP server is missing and the snyk CLI is installed, it adds the server to Claude Code at user scope (pass `--no-mcp-add` to skip). It walks these stages in order, stops at the first one that isn't met, prints the fix, and ends with `NEXT=<stage>` (`NEXT=ready` when everything that blocks an import is in place). Handle the stage it names, then run it again; repeat until `NEXT=ready`. Show the user its checklist each time.
 
 | `NEXT=` | Stage | What to do |
 |---|---|---|
@@ -122,7 +122,7 @@ It's read-only. It walks these stages in order, stops at the first one that isn'
 | `token` | The Snyk API rejects the credentials | Show the fix it prints: new token, `snyk auth` again, or `SNYK_API` for EU/AU tenants. |
 | `org` | No Snyk org named like a repo's GitHub owner | Give the user the create-org steps it prints. Don't import into a different org unless they pass `--snyk-org`. |
 | `app` | That Snyk org has no GitHub Cloud App integration | Give the user the link it prints and ask them to click Install on GitHub. Offer to wait: rerun with `--wait` (polls every 10 s, up to `--wait-minutes`, default 10) and continue as soon as the install shows up. Installing a GitHub App always needs that one click by the account or org owner; it can't be automated. |
-| `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the optional Snyk MCP server (offer `/snyk-onboard:setup-mcp`). |
+| `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the Snyk MCP server line: the check adds it automatically once the snyk CLI is installed; when it reports *Added*, tell the user to run `/mcp` or restart Claude Code to load the `mcp__snyk__*` tools. |
 
 If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
 

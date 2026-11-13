@@ -63,7 +63,7 @@ Every `/snyk-onboard` run starts with a setup check (`scripts/preflight.py`). It
 | 4 | A Snyk org named like each GitHub org | Steps to create it |
 | 5 | GitHub Cloud App integration in that Snyk org | The install link, and it can wait (`--wait`) while you click Install |
 | 6 | `SNYK_TOKEN` Actions secret on the repos | Warning with the `gh secret set` command (only CI needs it) |
-| 7 | Snyk MCP server | Optional; suggests `/snyk-onboard:setup-mcp` |
+| 7 | Snyk MCP server | Added to Claude Code automatically (user scope) once the Snyk CLI is installed; `--no-mcp-add` skips it |
 
 Run it on its own: `python3 scripts/preflight.py --repo brightsheets/snyk-demo-node-1 [--wait]`. Install the CLIs by hand: `bash scripts/install_tools.sh gh snyk`.
 

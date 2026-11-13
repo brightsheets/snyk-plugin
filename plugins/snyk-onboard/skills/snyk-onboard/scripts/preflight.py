@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Progressive setup check for /snyk-onboard. Read-only: it never installs or changes anything.
+"""Progressive setup check for /snyk-onboard. It changes one thing only: when the Snyk MCP server is
+missing and the snyk CLI is installed, it adds the server to Claude Code at user scope
+(`claude mcp add snyk --scope user -- <snyk> mcp -t stdio`); pass --no-mcp-add to skip that.
+Everything else is read-only.
 
 Walks the prerequisites in order and stops at the first one that isn't met, printing the exact fix.
 Fix it, rerun, and it moves on to the next stage:
@@ -10,7 +13,7 @@ Fix it, rerun, and it moves on to the next stage:
   4. org      a Snyk org named like each repo's GitHub owner (or --snyk-org / SNYK_ORG)
   5. app      that Snyk org has the GitHub Cloud App integration (--wait polls while you install it)
   6. secrets  SNYK_TOKEN Actions secret on the repos (only needed for CI scans; warning, not a stop)
-  7. mcp      Snyk MCP server in Claude Code (optional; warning, never a stop)
+  7. mcp      Snyk MCP server in Claude Code: added automatically when missing (never a stop)
 
 Usage:
   preflight.py --repo brightsheets/snyk-demo-node-1 [--repo test-snyk-demo/api] [--snyk-org <slug>]
@@ -198,14 +201,29 @@ def stage_secrets(repos):
 def stage_mcp():
     if not os.path.exists(MCP_CHECK):
         return
-    rc, out = sh(["bash", MCP_CHECK])
+    rc, out = sh(["bash", MCP_CHECK], timeout=90)
     kv = dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
     if kv.get("STATUS") in ("configured", "connected"):
-        report("mcp", True, f"Snyk MCP server configured ({kv.get('NAME', 'snyk')})", blocking=False)
+        report("mcp", True, f"Snyk MCP server configured in Claude Code ({kv.get('NAME', 'snyk')})", blocking=False)
+        return
+    snyk, claude = shutil.which("snyk"), shutil.which("claude")
+    if not snyk:
+        report("mcp", False, "Snyk MCP server not set up; it's added automatically once the snyk CLI is installed.",
+               "Install the CLI (stage 'creds'): bash scripts/install_tools.sh snyk", blocking=False)
+        return
+    cmd = ["claude", "mcp", "add", "snyk", "--scope", "user", "--", snyk, "mcp", "-t", "stdio"]
+    if args.no_mcp_add or not claude:
+        report("mcp", False, "Snyk MCP server not set up.",
+               "Add it with: ! " + " ".join(cmd), blocking=False)
+        return
+    rc, out = sh(cmd, timeout=60)
+    ok = rc == 0 and sh(["claude", "mcp", "get", "snyk"], timeout=60)[0] == 0
+    if ok:
+        report("mcp", True, f"Added the Snyk MCP server to Claude Code (user scope, {snyk} mcp -t stdio). "
+               "Run /mcp or restart Claude Code to load its tools.", blocking=False)
     else:
-        report("mcp", False, "Snyk MCP server not set up (optional: lets Claude run Snyk scans in chat).",
-               "After the snyk CLI is installed and signed in, run /snyk-onboard:setup-mcp (asks before adding it).",
-               blocking=False)
+        report("mcp", False, f"Couldn't add the Snyk MCP server: {out.strip()[:200]}",
+               "Add it by hand: ! " + " ".join(cmd), blocking=False)
 
 
 # ---------- main ----------
@@ -217,6 +235,7 @@ ap.add_argument("--snyk-org", help="Snyk org to use for every repo instead of th
 ap.add_argument("--wait", action="store_true", help="poll until the GitHub Cloud App integration appears")
 ap.add_argument("--wait-minutes", type=float, default=10)
 ap.add_argument("--json", action="store_true")
+ap.add_argument("--no-mcp-add", action="store_true", help="don't add the Snyk MCP server when it's missing")
 args = ap.parse_args()
 
 repos = si.split_repos(args.repo, args.file)
