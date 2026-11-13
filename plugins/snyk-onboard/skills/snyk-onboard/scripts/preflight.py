@@ -182,7 +182,7 @@ def token_steps(owner, user, scopes, create):
            f"from an owner of the {owner} org or a Snyk app manager, authorized for {owner}'s SSO if it uses SSO")
     return (f"- Token: create a new token or use an existing one: classic (ghp_...), scope {' + '.join(scopes)} only, "
             f"{who}\n"
-            "- In a new terminal, run: export GH_APP_ADMIN_TOKEN=<your-token>\n"
+            "- Run: export GH_APP_ADMIN_TOKEN=<your-token>\n"
             "Then type \"done\" when it's completed.")
 
 
