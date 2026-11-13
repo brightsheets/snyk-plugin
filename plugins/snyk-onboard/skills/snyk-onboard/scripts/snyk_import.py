@@ -26,7 +26,7 @@ Env:
   SNYK_TOKEN   service-account or personal API token (falls back to the snyk CLI OAuth login)
   GH_APP_ADMIN_TOKEN  classic GitHub PAT (repo scope, SSO-authorized) of an org owner or Snyk app
                manager; needed to list/add repos on a selected-repos app installation
-  SNYK_ORG     default Snyk org (id or slug) when a repo's owner isn't mapped; default "brightsheets"
+  SNYK_ORG     Snyk org (id or slug) for every unmapped owner. Unset: the Snyk org named like the GitHub owner
   SNYK_API     API base, default https://api.snyk.io  (EU: https://api.eu.snyk.io, AU: https://api.au.snyk.io)
 """
 import argparse, collections, datetime, json, os, re, subprocess, sys, time
@@ -34,7 +34,10 @@ import urllib.error, urllib.parse, urllib.request
 
 API = os.environ.get("SNYK_API", "https://api.snyk.io").rstrip("/")
 REST_VERSION = "2024-10-15"
-DEFAULT_ORG = os.environ.get("SNYK_ORG", "brightsheets")  # https://app.snyk.io/org/brightsheets
+# Snyk org per repo: --org-id, else the mapping file, else the Snyk org whose slug or name equals the
+# repo's GitHub owner (brightsheets -> brightsheets, test-snyk-demo -> test-snyk-demo). SNYK_ORG, if
+# set, replaces the same-name rule for every unmapped owner. Nothing ever falls back to another org.
+DEFAULT_ORG = os.environ.get("SNYK_ORG", "")
 DEFAULT_OWNER = os.environ.get("GITHUB_OWNER", "brightsheets")
 
 
@@ -137,7 +140,13 @@ def org_id_for(key):
     for o in rest_all(f"/rest/orgs?slug={urllib.parse.quote(key)}&limit=10"):
         if o["attributes"].get("slug") == key:
             return o["id"]
-    sys.exit(f"No Snyk org with slug '{key}' is visible to these credentials (see `snyk_import.py orgs`).")
+    # Slug lookups are exact; also accept an org whose display name matches (case-insensitive).
+    for o in rest_all("/rest/orgs?limit=100"):
+        a = o["attributes"]
+        if key.lower() in ((a.get("slug") or "").lower(), (a.get("name") or "").lower()):
+            return o["id"]
+    raise LookupError(f"No Snyk org named '{key}' is visible to these credentials (see `snyk_import.py orgs`). "
+                      f"Create it in Snyk, or give this token access to it.")
 
 
 def live_integrations(org_id):
@@ -170,17 +179,20 @@ def resolve(mapping, owner, org_key=None, integration=None):
     if org_key:
         org = find_org(mapping, org_key)
         if not org:  # unknown to the mapping: use it live
-            oid = org_id_for(org_key)
+            try:
+                oid = org_id_for(org_key)
+            except LookupError as e:
+                return None, None, None, str(e)
             org = {"id": oid, "slug": org_key, "integrations": live_integrations(oid), "github_orgs": {}}
         candidates = [org]
     else:
         lower = owner.lower()
         candidates = [o for o in mapping["orgs"] if lower in {g.lower() for g in o.get("github_orgs", {})}]
-        if not candidates and DEFAULT_ORG:
-            return resolve(mapping, owner, DEFAULT_ORG, integration)
-        if not candidates:
-            return None, None, None, (f"GitHub owner '{owner}' is not mapped to a Snyk org in references/snyk-orgs.json; "
-                                      "pass --org-id, set SNYK_ORG, or add the owner to the mapping")
+        if not candidates:  # same-name rule: GitHub owner X -> Snyk org X (or SNYK_ORG if set)
+            org, itype, iid, why = resolve(mapping, owner, DEFAULT_ORG or owner, integration)
+            if org and why and not why.startswith("Snyk org"):
+                why += f"; Snyk org matched by {'SNYK_ORG' if DEFAULT_ORG else 'GitHub owner name'}"
+            return org, itype, iid, why
         if len(candidates) > 1:
             return None, None, None, f"'{owner}' maps to several Snyk orgs ({[o['slug'] for o in candidates]}); pass --org-id"
     org = candidates[0]
@@ -640,7 +652,7 @@ def main():
     p.add_argument("--max-pages", type=int, default=5, help="project pages (100 each) sampled per org")
     p.set_defaults(fn=cmd_refresh)
     p = sub.add_parser("import")
-    p.add_argument("--org-id", help="Snyk org id or slug; default: resolved per repo from the mapping, else SNYK_ORG (brightsheets)")
+    p.add_argument("--org-id", help="Snyk org id or slug; default: per repo from the mapping, else the Snyk org named like the GitHub owner")
     p.add_argument("--integration", choices=SCM_TYPES, help="force an integration type")
     p.add_argument("--plan"); p.add_argument("--branch")
     p.add_argument("--repo", nargs="+", help="one or more repos: owner/name or bare name (owner brightsheets), space or comma separated; @file reads a list")

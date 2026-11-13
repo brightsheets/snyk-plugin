@@ -28,4 +28,4 @@ Add `--dry-run` to either one to see the plan without changing anything.
 /snyk-onboard snyk-demo-go-1 snyk-demo-go-2 --dry-run
 ```
 
-Sign in first: `gh auth login` and `snyk auth`. The default Snyk org is [`brightsheets`](https://app.snyk.io/org/brightsheets); set `SNYK_ORG` to use another.
+Sign in first: `gh auth login` and `snyk auth`. Each GitHub org maps to the Snyk org with the same name: `brightsheets` → [`brightsheets`](https://app.snyk.io/org/brightsheets), `test-snyk-demo` → `test-snyk-demo`. Create the Snyk org (with its GitHub Cloud App integration) before onboarding that GitHub org.

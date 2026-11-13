@@ -122,7 +122,7 @@ REUSABLE = os.environ.get("REUSABLE_WORKFLOWS", "brightsheets/reusable-workflows
 def caller_workflow(owner, private):
     """.github/workflows/ci.yml calling the shared Go pipeline (lint, tests, Snyk)."""
     repo, ref = REUSABLE.split("@", 1)
-    w = ["snyk-org: brightsheets"]
+    w = [f"snyk-org: {owner}"]  # Snyk orgs are named like GitHub owners
     sec = ["snyk-token: ${{ secrets.SNYK_TOKEN }}"]
     note = "Needs secret SNYK_TOKEN (without it the Snyk scan is skipped with a warning)"
     if private:
@@ -138,14 +138,14 @@ def caller_workflow(owner, private):
             "    secrets:\n" + "".join(f"      {x}\n" for x in sec))
 
 
-def js_caller_workflow(src_dir):
+def js_caller_workflow(src_dir, owner):
     """.github/workflows/ci.yml for a Node.js copy, calling the shared js-ci pipeline."""
     repo, ref = REUSABLE.split("@", 1)
     node, docker = "lts/*", os.path.exists(os.path.join(src_dir, "Dockerfile"))
     if docker:
         m = re.search(r"^FROM\s+node:(\d+)", open(os.path.join(src_dir, "Dockerfile")).read(), re.M | re.I)
         node = m.group(1) if m else node
-    w = [f'node-version: "{node}"', "snyk-org: brightsheets"]
+    w = [f'node-version: "{node}"', f"snyk-org: {owner}"]
     if docker:
         w += ["docker-build: true", "dry-run: true   # demo app: build and scan the image, never push it"]
     return (f"# Runs {repo}/.github/workflows/js-ci.yaml@{ref}: build, Snyk Open Source + Code"
@@ -389,7 +389,7 @@ def push_copy(plan, r, src_dir, sha, author, env, delay):
         if plan["lang"] == "node":
             os.makedirs(os.path.join(work, ".github", "workflows"), exist_ok=True)
             with open(os.path.join(work, ".github", "workflows", "ci.yml"), "w") as f:
-                f.write(js_caller_workflow(src_dir))
+                f.write(js_caller_workflow(src_dir, owner))
         g = git_cmd(author)
         run(["git", "init", "-q", "-b", "main"], cwd=work)
         run(g + ["add", "-A"], cwd=work)

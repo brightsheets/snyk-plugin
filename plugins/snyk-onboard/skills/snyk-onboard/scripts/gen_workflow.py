@@ -10,9 +10,11 @@ Go repos get a short caller of the reusable pipeline in brightsheets/reusable-wo
 a Dockerfile). --repo-dir lets it read go.mod to see whether private brightsheets modules are
 needed. Other stacks, or --standalone, get a self-contained Snyk workflow.
 
-  --org defaults to $SNYK_ORG, else "brightsheets" (https://app.snyk.io/org/brightsheets).
+  --org defaults to $SNYK_ORG, else the repo's GitHub owner (Snyk orgs are named like GitHub
+  orgs: brightsheets -> brightsheets, test-snyk-demo -> test-snyk-demo). --private-owners
+  defaults to that owner too.
 """
-import argparse, json, os, re
+import argparse, json, os, re, subprocess, sys
 
 SETUP = {
     "javascript": "      - uses: actions/setup-node@v4\n        with: { node-version: 'lts/*' }\n      - run: npm ci --ignore-scripts || yarn install --frozen-lockfile || pnpm install --frozen-lockfile\n",
@@ -27,6 +29,23 @@ SETUP = {
 
 
 REUSABLE = os.environ.get("SNYK_REUSABLE_WORKFLOWS", "brightsheets/reusable-workflows@v1")
+
+
+def repo_owner(stack, repo_dir):
+    """GitHub owner from detect_stack's source (owner/repo) or the checkout's origin remote."""
+    m = re.match(r"^([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+$", stack.get("source") or "")
+    if m:
+        return m.group(1)
+    if repo_dir:
+        try:
+            url = subprocess.run(["git", "-C", repo_dir, "remote", "get-url", "origin"],
+                                 capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            url = ""
+        m = re.search(r"github\.com[:/]([A-Za-z0-9_.-]+)/", url)
+        if m:
+            return m.group(1)
+    return None
 
 
 def private_go_owners(repo_dir, owners):
@@ -77,14 +96,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stack")
     ap.add_argument("--severity", default="high", choices=["low", "medium", "high", "critical"])
-    ap.add_argument("--org", default=os.environ.get("SNYK_ORG", "brightsheets"),
-                    help="Snyk org slug (default: $SNYK_ORG, else brightsheets)")
+    ap.add_argument("--org", default=os.environ.get("SNYK_ORG"),
+                    help="Snyk org slug (default: $SNYK_ORG, else the repo's GitHub owner)")
     ap.add_argument("--repo-dir", help="checkout of the repo, to read go.mod for private module owners")
-    ap.add_argument("--private-owners", default=os.environ.get("GITHUB_OWNER", "brightsheets"),
-                    help="comma-separated owners whose Go modules are private (default brightsheets)")
+    ap.add_argument("--private-owners", default=os.environ.get("GITHUB_OWNER"),
+                    help="comma-separated owners whose Go modules are private (default: the repo's GitHub owner)")
     ap.add_argument("--standalone", action="store_true", help="self-contained workflow even for Go repos")
     a = ap.parse_args()
     s = json.load(open(a.stack))
+    owner = repo_owner(s, a.repo_dir)
+    if not a.org or not a.private_owners:
+        if not owner:
+            sys.exit("Can't tell the repo's GitHub owner (needed for the Snyk org); pass --org and --private-owners.")
+        a.org = a.org or owner
+        a.private_owners = a.private_owners or owner
     if "go" in s.get("ecosystems", {}) and not a.standalone:
         out = go_caller(s, a)
         if "iac" in s["snyk_products"]:  # go-ci doesn't scan IaC; add a job for it

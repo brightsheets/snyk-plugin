@@ -70,7 +70,7 @@ If no arguments were given, reply with that usage line and the arguments table b
 | `--file <path>` or `@path` | Read repos from a file: one per line (commas also work), `#` starts a comment, blank lines ignored, duplicates dropped. Can be combined with repos on the command line. Expand it with `python3 scripts/snyk_import.py repos --file <path>`; if that fails (file missing, bad name), show the error and stop. |
 | `path` | A local checkout. |
 | `--org <github-org>` | Every repo in the org. Archived repos, forks and empty repos are skipped. |
-| `--snyk-org <id\|slug>` | Snyk org to import into. If missing, it's looked up from the repo's GitHub owner in `references/snyk-orgs.json`; if the owner isn't there, the default org `brightsheets` is used (override with `SNYK_ORG`). |
+| `--snyk-org <id\|slug>` | Snyk org to import into. If missing: the repo's GitHub owner in `references/snyk-orgs.json`, else the Snyk org **named like the GitHub owner** (`brightsheets` → `brightsheets`, `test-snyk-demo` → `test-snyk-demo`). If no Snyk org has that name, the repo is not imported. `SNYK_ORG` replaces the same-name rule for every unmapped owner. |
 | `--filter <regex>` | With `--org`, only repos whose `owner/name` matches. |
 | `--severity <level>` | CI failure threshold: `low`, `medium`, `high` (default) or `critical`. |
 | `--no-ci` | Import into Snyk only. Do not open workflow PRs. |
@@ -95,7 +95,7 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 
 `references/snyk-orgs.json` ships empty. Fill it once with `scripts/snyk_import.py refresh-orgs`.
 
-The default Snyk org is `brightsheets` (https://app.snyk.io/org/brightsheets). Repos whose GitHub owner isn't in the mapping import there, and generated workflows pass `--org=brightsheets`. Set `SNYK_ORG` to use another org.
+**Each GitHub org maps to the Snyk org with the same name.** `brightsheets` repos go to Snyk org `brightsheets`, `test-snyk-demo` repos to Snyk org `test-snyk-demo`, and so on; generated workflows pass the same org. A repo whose owner has no same-name Snyk org (and isn't in the mapping) is skipped with the reason, never imported into another org. Create the Snyk org first (Snyk → Settings → Organizations), with its own GitHub Cloud App integration on the matching GitHub org.
 
 `references/snyk-orgs.json` lists your Snyk orgs with:
 - its ID, slug and group ID
@@ -139,7 +139,7 @@ Pass every entry in detection's `notes` on to the user. For example:
 ### 3. Plan and get approval
 1. Run `python3 scripts/snyk_import.py resolve --repo owner/name [--org-id …]` for each repo, or for one repo per GitHub owner in an org rollout.
    - **Resolved:** put the Snyk org and integration in the plan.
-   - **Owner not mapped:** show `snyk_import.py orgs` and ask which Snyk org to use. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
+   - **No Snyk org with the owner's name:** show `snyk_import.py orgs` and tell the user to create a Snyk org named like the GitHub org (or pass `--snyk-org`). Don't import into a different org on your own. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
    - **No GitHub integration in that org:** stop and say a Snyk admin must add one.
 2. If `references/snyk-orgs.json` is more than about 90 days old (`generated`), or an ID is rejected, run `refresh-orgs` and show the diff.
 3. Show the plan as one table, one row per repo: repo, branch, products, ecosystems, CI system, Snyk org, notes. Then list the skipped repos and the reason for each. For an org, propose waves: a pilot of about 10 repos, then the rest.
