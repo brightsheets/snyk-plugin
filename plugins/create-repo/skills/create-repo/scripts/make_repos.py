@@ -138,6 +138,26 @@ def caller_workflow(owner, private):
             "    secrets:\n" + "".join(f"      {x}\n" for x in sec))
 
 
+def js_caller_workflow(src_dir):
+    """.github/workflows/ci.yml for a Node.js copy, calling the shared js-ci pipeline."""
+    repo, ref = REUSABLE.split("@", 1)
+    node, docker = "lts/*", os.path.exists(os.path.join(src_dir, "Dockerfile"))
+    if docker:
+        m = re.search(r"^FROM\s+node:(\d+)", open(os.path.join(src_dir, "Dockerfile")).read(), re.M | re.I)
+        node = m.group(1) if m else node
+    w = [f'node-version: "{node}"', "snyk-org: brightsheets"]
+    if docker:
+        w += ["docker-build: true", "dry-run: true   # demo app: build and scan the image, never push it"]
+    return (f"# Runs {repo}/.github/workflows/js-ci.yaml@{ref}: build, Snyk Open Source + Code"
+            + (", Docker build + Snyk Container" if docker else "") + ".\n"
+            "# Needs secret SNYK_TOKEN (without it the Snyk scans are skipped with a warning).\n"
+            "name: CI\non:\n  push:\n    branches: [main, \"hotfix/**\"]\n  pull_request:\n  workflow_dispatch:\n"
+            "permissions:\n  contents: read\n  actions: read\n  security-events: write\n  pull-requests: write\n  packages: write\n"
+            f"jobs:\n  ci:\n    uses: {repo}/.github/workflows/js-ci.yaml@{ref}\n"
+            "    with:\n" + "".join(f"      {x}\n" for x in w) +
+            "    secrets:\n      snyk-token: ${{ secrets.SNYK_TOKEN }}\n")
+
+
 def lib_files(owner, name, deps_mod, deps_ver, deps_callable, prev, version):
     mod = f"github.com/{owner}/{name}"
     pkg = pkg_name(name)
@@ -363,6 +383,13 @@ def push_copy(plan, r, src_dir, sha, author, env, delay):
     work = tempfile.mkdtemp(prefix=f"{name}-")
     try:
         shutil.copytree(src_dir, work, dirs_exist_ok=True, symlinks=True)
+        # Drop upstream workflows (they expect the upstream repo's secrets); Node copies get a
+        # caller of the shared JavaScript pipeline instead.
+        shutil.rmtree(os.path.join(work, ".github", "workflows"), ignore_errors=True)
+        if plan["lang"] == "node":
+            os.makedirs(os.path.join(work, ".github", "workflows"), exist_ok=True)
+            with open(os.path.join(work, ".github", "workflows", "ci.yml"), "w") as f:
+                f.write(js_caller_workflow(src_dir))
         g = git_cmd(author)
         run(["git", "init", "-q", "-b", "main"], cwd=work)
         run(g + ["add", "-A"], cwd=work)
