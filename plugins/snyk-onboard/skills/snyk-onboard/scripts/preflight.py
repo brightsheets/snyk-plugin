@@ -153,14 +153,7 @@ def stage_app(orgs):
             ints = ints if status == 200 and isinstance(ints, dict) else {}
             if ints.get("github-cloud-app"):
                 report("app", True, f"Snyk org {label} has the GitHub Cloud App integration")
-                if not os.environ.get("GH_APP_ADMIN_TOKEN"):
-                    who = (f"a classic PAT of {owner} with the repo scope (github.com/settings/tokens/new?scopes=repo)"
-                           if owner_is_user(owner) else
-                           f"a classic PAT (repo + admin:org) of an owner of {owner} or a Snyk app manager")
-                    report("app", False, f"GH_APP_ADMIN_TOKEN isn't set, so repos can't be added to the Snyk app "
-                           f"for {owner} automatically (needed when the app has 'selected repositories' access).",
-                           f"Set GH_APP_ADMIN_TOKEN to {who}, e.g. in ~/.claude/settings.json -> \"env\", and restart.",
-                           blocking=False)
+                check_admin_token(owner)
                 break
             if time.time() >= deadline:
                 other = [t for t in ("github", "github-enterprise") if ints.get(t)]
@@ -178,6 +171,52 @@ def stage_app(orgs):
                 print(f"   … waiting for the GitHub Cloud App in Snyk org {label} (install it at {url})", flush=True)
             time.sleep(10)
     return ok_all
+
+
+SET_TOKEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "set_env_token.sh")
+
+
+def check_admin_token(owner):
+    """GH_APP_ADMIN_TOKEN lets the importer add repos to the Snyk app. Warn (never block) if missing or wrong."""
+    user = owner_is_user(owner)
+    scopes_needed = ["repo"] if user else ["repo", "admin:org"]
+    scope_qs = ",".join(scopes_needed)
+    create = f"https://github.com/settings/tokens/new?scopes={scope_qs}&description=snyk-onboard"
+    who = f"a classic token of {owner}" if user else f"a classic token of an owner of {owner} (or a Snyk app manager)"
+    setter = f"bash {SET_TOKEN} GH_APP_ADMIN_TOKEN"
+    token = os.environ.get("GH_APP_ADMIN_TOKEN")
+    if not token:
+        report("app", False, f"GH_APP_ADMIN_TOKEN isn't set, so the plugin can't add repos to the Snyk app for {owner} "
+               "(PR checks and fix PRs need each repo in the app).",
+               f"1. Create {who} with the {' + '.join(scopes_needed)} scope(s): {create}\n"
+               f"2. In your own terminal (not in the chat), run:\n     {setter}\n"
+               "   It asks for the token with hidden input and saves it to ~/.claude/settings.json.\n"
+               "3. Restart Claude Code, then run /snyk-onboard again.", blocking=False)
+        return
+    import urllib.request, urllib.error
+    req = urllib.request.Request("https://api.github.com/user", headers={
+        "Authorization": f"token {token}", "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            have = {x.strip() for x in (r.headers.get("X-OAuth-Scopes") or "").split(",") if x.strip()}
+            classic = r.headers.get("X-OAuth-Scopes") is not None
+            login = json.loads(r.read()).get("login", "?")
+    except urllib.error.HTTPError as e:
+        report("app", False, f"GH_APP_ADMIN_TOKEN is set but GitHub rejects it (HTTP {e.code}).",
+               f"Make a new one ({create}) and run: {setter}", blocking=False)
+        return
+    missing = [sc for sc in scopes_needed if sc not in have and not (sc == "admin:org" and "write:org" in have)]
+    if not classic:
+        report("app", False, f"GH_APP_ADMIN_TOKEN ({login}) is a fine-grained or app token; GitHub only accepts a "
+               "classic token for adding repos to an app installation.",
+               f"Create a classic one: {create}\nThen run: {setter}", blocking=False)
+    elif missing:
+        report("app", False, f"GH_APP_ADMIN_TOKEN ({login}) lacks scope(s): {', '.join(missing)}.",
+               f"Edit the token to add them (github.com/settings/tokens) or create a new one: {create}\n"
+               f"Then run: {setter}", blocking=False)
+    else:
+        report("app", True, f"GH_APP_ADMIN_TOKEN is a classic token of {login} with {', '.join(sorted(have & set(scopes_needed)))}: "
+               "repos are added to the Snyk app automatically")
 
 
 _user_cache = {}

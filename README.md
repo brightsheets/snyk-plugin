@@ -88,7 +88,13 @@ Presets: `recommended`, `checks-only`; single settings with `--set key=value`. T
 | `SNYK_TOKEN` as a GitHub Actions secret, for the CI scans | `gh secret set SNYK_TOKEN --org <org> --visibility all` (orgs) or `--repo <owner/repo>` (personal accounts) |
 | `gh auth login` with the `repo` and `read:org` scopes | terminal |
 
-If the app is installed on **selected repositories** only, the importer adds each repo to it when `GH_APP_ADMIN_TOKEN` is set: a classic PAT of an org owner (`repo` + `admin:org`, SSO-authorized) for an organization, or of the account itself (`repo`) for a personal account. `gh`'s own token can't do this. Without it, the importer tells you which repos to add by hand. Public repos import even without app access, but PR checks and fix PRs only work once the repo is in the app.
+If the app is installed on **selected repositories** only, the importer adds each repo to it when `GH_APP_ADMIN_TOKEN` is set: a classic PAT of an org owner (`repo` + `admin:org`, SSO-authorized) for an organization, or of the account itself (`repo`) for a personal account. `gh`'s own token can't do this. When it's missing, `/snyk-onboard` asks whether to set it and gives you the command; run it in your own terminal (it reads the token with hidden input and saves it to `~/.claude/settings.json`):
+
+```
+bash ~/.claude/plugins/cache/keezconsign/snyk-onboard/<version>/skills/snyk-onboard/scripts/set_env_token.sh GH_APP_ADMIN_TOKEN
+```
+
+The same script stores `SNYK_TOKEN` or `GO_MODULES_TOKEN`, and `--remove NAME` deletes one. Without the token, the importer tells you which repos to add by hand. Public repos import even without app access, but PR checks and fix PRs only work once the repo is in the app.
 
 ## Create demo repos: `/create-repo`
 
