@@ -22,8 +22,8 @@ allowed-tools: >-
 
   WHAT IT CHANGES (only after you approve)
   - Go: creates deps-01 if it's missing, and seeds it with a small Go package
-    and tag v0.1.0 if it's missing or empty. Creates snyk-demo-go-N repos,
-    pushes them and tags v0.1.0.
+    and tag v1.0.0 if it's missing or empty. Creates snyk-demo-go-N repos,
+    pushes them and tags v1.0.0.
   - Node/Java: creates snyk-demo-node-N / snyk-demo-java-N, each holding the
     latest code of snyk-labs/nodejs-goof or snyk-labs/java-goof.
   - Adds the topic snyk-demo to each so they're easy to find.
@@ -43,7 +43,7 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 | Command | Repos |
 |---|---|
 | `/create-repo` (default: 2 Go repos) | `snyk-demo-go-N` with cross-org deps on `deps-01`, and `snyk-demo-go-N+1` with public deps only. |
-| `/create-repo 5` (Go is the default language) | `snyk-demo-go-1` … `-5`. Repos 1–4 have **cross-org deps**: each `go.mod` (and `go.sum` when Go is installed) requires and calls `deps-01` plus the one or two repos before it. Repo 5 has **public deps only**, no cross-org deps: `github.com/google/uuid` and `golang.org/x/text` v0.3.7 (deliberately old, with a known vulnerability, so Snyk finds something). Tagged `v0.1.0`. |
+| `/create-repo 5` (Go is the default language) | `snyk-demo-go-1` … `-5`. Repos 1–4 have **cross-org deps**: each `go.mod` (and `go.sum` when Go is installed) requires and calls `deps-01` plus the one or two repos before it. Repo 5 has **public deps only**, no cross-org deps: `github.com/google/uuid` and `golang.org/x/text` v0.3.7 (deliberately old, with a known vulnerability, so Snyk finds something). Tagged `v1.0.0`. |
 | `/create-repo node 3` | `snyk-demo-node-1` … `-3`, each a copy of the latest [snyk-labs/nodejs-goof](https://github.com/snyk-labs/nodejs-goof) (a deliberately vulnerable Node.js app). |
 | `/create-repo java 2` | `snyk-demo-java-1` … `-2`, each a copy of the latest [snyk-labs/java-goof](https://github.com/snyk-labs/java-goof). |
 | `/create-repo payments orders` | Those names. For Go, each gets cross deps. `--standalone NAME` adds a Go repo with public deps only. |
@@ -51,7 +51,7 @@ Script: `scripts/make_repos.py` (run it from this skill's folder). Pass the user
 - **CI caller:** every Go repo gets `.github/workflows/ci.yml`, which calls `brightsheets/reusable-workflows/.github/workflows/go-ci.yaml@v1` (lint, tests, Snyk). Repos with cross-org deps also pass `go-private-owners` and the `GO_MODULES_TOKEN` secret. Without a `SNYK_TOKEN` secret the Snyk scan is skipped with a warning; without `GO_MODULES_TOKEN`, repos with cross-org deps can't download their private modules, so lint and tests fail until it's set. To add the caller to Go repos made before this, run `python3 scripts/make_repos.py add-caller <repos…>` (dry run) and then add `--apply`.
 - **Numbering:** numbers continue after the highest existing one (if `snyk-demo-go-5` exists, the next run starts at 6), so names never clash. A name the user gives that already exists stops the run.
 - **Copies, not forks:** GitHub allows only one fork of a repo per account, and forks of public repos can't be private.
-- **`deps-01`:** for Go, if `deps-01` is missing it is created (public), and if it is missing or empty it is seeded with a small Go package and tag `v0.1.0`.
+- **`deps-01`:** for Go, if `deps-01` is missing it is created (public), and if it is missing or empty it is seeded with a small Go package and tag `v1.0.0`.
 
 ## Options (rarely needed)
 

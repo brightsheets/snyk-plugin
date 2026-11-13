@@ -13,7 +13,7 @@
   make_repos.py list                   # repos this script made
 
 Numbered names continue after the highest existing one, so they never clash. New repos are private
-unless --public. Go: if deps-01 is empty it is seeded with a small Go package tagged v0.1.0 first.
+unless --public. Go: if deps-01 is empty it is seeded with a small Go package tagged v1.0.0 first.
 Never overwrites, force-pushes or deletes. Needs gh (repo scope) and git; go is optional (go.sum).
 """
 import argparse, base64, json, os, re, shutil, subprocess, sys, tempfile, time
@@ -102,13 +102,13 @@ def latest(tags):
 
 # ---------- file contents ----------
 
-def deps_files(owner, deps):
+def deps_files(owner, deps, version):
     mod = f"github.com/{owner}/{deps}"
     return {
         "go.mod": f"module {mod}\n\ngo {GO_VERSION}\n",
         "deps.go": (f"// Package deps is a shared module that the snyk-demo-go repos depend on.\n"
                     f"package deps\n\nimport \"fmt\"\n\n"
-                    f"// Version identifies this module.\nfunc Version() string {{ return \"{deps} v0.1.0\" }}\n\n"
+                    f"// Version identifies this module.\nfunc Version() string {{ return \"{deps} {version}\" }}\n\n"
                     f"// Greet is called by every dependent library.\n"
                     f"func Greet(caller string) string {{ return fmt.Sprintf(\"%s uses {deps}\", caller) }}\n"),
         "README.md": f"# {deps}\n\nShared Go module. Fixture repos tagged `{TOPIC}` depend on it.\n",
@@ -253,7 +253,7 @@ def build_plan(a):
         ds = repo_state(owner, a.deps)
         if ds is None or ds["empty"]:  # missing: create it (public) and seed it; empty: just seed it
             plan["repos"].append({"name": a.deps, "kind": "deps", "action": "create" if ds is None else "seed",
-                                  "visibility": "public", "files": deps_files(owner, a.deps)})
+                                  "visibility": "public", "files": deps_files(owner, a.deps, a.version)})
             deps_ver, deps_callable = a.version, True
         else:
             if ds["module"] and ds["module"] != deps_mod:
@@ -262,7 +262,7 @@ def build_plan(a):
                 sys.exit(f"{owner}/{a.deps} has code but no go.mod or no Go package at its root; repos can't import it.")
             deps_ver = latest(ds["tags"])
             if not deps_ver:
-                sys.exit(f"{owner}/{a.deps} has no vX.Y.Z tag. Tag it (e.g. v0.1.0) so go.mod can require it.")
+                sys.exit(f"{owner}/{a.deps} has no vX.Y.Z tag. Tag it (e.g. v1.0.0) so go.mod can require it.")
             deps_callable = ds["marker"]  # our own seed has deps.Greet; otherwise import it for side effects
             plan["repos"].append({"name": a.deps, "kind": "deps", "action": "reuse", "version": deps_ver})
         plan["deps"] = {"module": deps_mod, "version": deps_ver, "calls_greet": deps_callable}
@@ -339,7 +339,7 @@ def push_repo(plan, r, author, env, has_go, delay):
         run(["git", "init", "-q", "-b", "main"], cwd=work)
         run(g + ["add", "-A"], cwd=work)
         run(g + ["commit", "-q", "-m", {"go-deps": "Add Go module with cross-org dependencies", "go-public-deps": "Add Go module with public dependencies only"}.get(r["kind"], "Add Go module")], cwd=work)
-        run(g + ["tag", "-a", plan["version"], "-m", plan["version"]], cwd=work)
+        run(g + ["tag", plan["version"]], cwd=work)  # lightweight tag
         run(["git", "push", "-q", url, "main", plan["version"]], cwd=work, env=env)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -386,7 +386,20 @@ def cmd_create(a):
         print("\nDry run. Rerun with --apply to create these repos.")
         return
     author, env = identity(), git_env(plan["owner"])
+    # Fresh module cache per run: a deleted and recreated repo can reuse a tag (e.g. deps-01 v1.0.0)
+    # with different content, and a cached old copy would put a stale checksum in go.sum.
+    modcache = tempfile.mkdtemp(prefix="gomodcache-")
+    env["GOMODCACHE"] = modcache
     print()
+    try:
+        _create(plan, a, author, env)
+    finally:
+        subprocess.run(["chmod", "-R", "u+w", modcache], capture_output=True)  # go makes the cache read-only
+        shutil.rmtree(modcache, ignore_errors=True)
+    print("Done.")
+
+
+def _create(plan, a, author, env):
     if plan["lang"] in SOURCES:
         src_dir, sha = fetch_source(plan["source"], env)
         try:
@@ -402,7 +415,6 @@ def cmd_create(a):
         for r in plan["repos"]:  # order matters: deps, then libs low to high, then the no-deps repo
             if r["action"] in ("create", "seed"):
                 push_repo(plan, r, author, env, has_go, a.delay)
-    print("Done.")
 
 
 def cmd_add_caller(a):
@@ -454,7 +466,7 @@ def main():
         p.add_argument("--prefix", help="name prefix for numbered repos (default snyk-demo-<lang>)")
         p.add_argument("--deps", default="deps-01", help="Go: shared module repo (default deps-01)")
         p.add_argument("--standalone", help="Go: name of the repo with public deps only (default: the last numbered one)")
-        p.add_argument("--version", default="v0.1.0", help="Go: tag for new repos (default v0.1.0)")
+        p.add_argument("--version", default="v1.0.0", help="Go: tag for new repos (default v1.0.0)")
         p.add_argument("--public", action="store_true", help="make new repos public (default private)")
         p.add_argument("--delay", type=float, default=2.0, help="seconds between repos (default 2)")
         if name == "create":
