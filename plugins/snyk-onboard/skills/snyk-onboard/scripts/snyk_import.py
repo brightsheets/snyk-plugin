@@ -290,6 +290,26 @@ def app_access_fixes(owner, name, detail="", settings_url=None):
     return fixes
 
 
+_PROJECTS_CACHE = {}
+
+
+def existing_projects(org_id, owner, name):
+    """Live list of the org's Snyk projects for owner/name, as (origin, type, name). Cached per org."""
+    if org_id not in _PROJECTS_CACHE:
+        try:
+            _PROJECTS_CACHE[org_id] = [p["attributes"] for p in rest_all(f"/rest/orgs/{org_id}/projects?limit=100")]
+        except RuntimeError as e:
+            print(f"     (couldn't list existing Snyk projects: {e})")
+            _PROJECTS_CACHE[org_id] = None
+    rows = _PROJECTS_CACHE[org_id]
+    if rows is None:
+        return None
+    full = f"{owner}/{name}".lower()
+    return [(a.get("origin", ""), a.get("type", ""), a.get("name", "")) for a in rows
+            if (a.get("name", "").lower() == full or a.get("name", "").lower().startswith(full + ":")
+                or a.get("name", "").lower().startswith(full + "("))]
+
+
 def default_branch(owner, name):
     status, data = gh("GET", f"repos/{owner}/{name}")
     return (data or {}).get("default_branch") if status == 200 else None
@@ -685,6 +705,12 @@ def cmd_import(a):
             branch = t.get("branch") or default_branch(t["owner"], t["name"])
             if branch:
                 target["branch"] = branch
+            have = existing_projects(org_id, t["owner"], t["name"])
+            if have:
+                kinds = ", ".join(sorted({f"{o} {ty}" for o, ty, _ in have}))
+                print(f"     already in Snyk: {len(have)} project(s) ({kinds}); importing again refreshes them")
+            elif have is not None:
+                print("     not in Snyk yet (checked the org's live project list)")
             if not a.apply:
                 print(f"     would import {repo}@{target.get('branch') or 'default branch (unknown)'}")
                 rec["result"] = "dry-run"
