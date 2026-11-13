@@ -23,6 +23,7 @@ Env:
   SNYK_TOKEN   service-account or personal API token (falls back to the snyk CLI OAuth login)
   GH_APP_ADMIN_TOKEN  classic GitHub PAT (repo scope, SSO-authorized) of an org owner or Snyk app
                manager; needed to list/add repos on a selected-repos app installation
+  SNYK_ORG     default Snyk org (id or slug) when a repo's owner isn't mapped; default "brightsheets"
   SNYK_API     API base, default https://api.snyk.io  (EU: https://api.eu.snyk.io, AU: https://api.au.snyk.io)
 """
 import argparse, collections, datetime, json, os, re, subprocess, sys, time
@@ -30,6 +31,7 @@ import urllib.error, urllib.parse, urllib.request
 
 API = os.environ.get("SNYK_API", "https://api.snyk.io").rstrip("/")
 REST_VERSION = "2024-10-15"
+DEFAULT_ORG = os.environ.get("SNYK_ORG", "brightsheets")  # https://app.snyk.io/org/brightsheets
 SCM_TYPES = ["github-cloud-app", "github", "github-enterprise"]  # preference order; never cli/ecr/etc.
 DEFAULT_EXCLUDES = "fixtures, tests, __tests__, node_modules, vendor, third_party, Intermediate, Binaries, Library"
 MAPPING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "snyk-orgs.json")
@@ -93,7 +95,21 @@ def rest_all(path, max_pages=50):
     return items
 
 
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def org_id_for(key):
+    """Snyk org UUID for an id or slug. The v1 import API needs the UUID."""
+    if UUID_RE.match(key):
+        return key
+    for o in rest_all(f"/rest/orgs?slug={urllib.parse.quote(key)}&limit=10"):
+        if o["attributes"].get("slug") == key:
+            return o["id"]
+    sys.exit(f"No Snyk org with slug '{key}' is visible to these credentials (see `snyk_import.py orgs`).")
+
+
 def live_integrations(org_id):
+    org_id = org_id_for(org_id)
     status, _, body = call("GET", f"/v1/org/{org_id}/integrations")
     if status != 200:
         sys.exit(f"Could not list integrations for {org_id} (HTTP {status}): {body}")
@@ -122,15 +138,17 @@ def resolve(mapping, owner, org_key=None, integration=None):
     if org_key:
         org = find_org(mapping, org_key)
         if not org:  # unknown to the mapping: use it live
-            ints = live_integrations(org_key)
-            org = {"id": org_key, "slug": org_key, "integrations": ints, "github_orgs": {}}
+            oid = org_id_for(org_key)
+            org = {"id": oid, "slug": org_key, "integrations": live_integrations(oid), "github_orgs": {}}
         candidates = [org]
     else:
         lower = owner.lower()
         candidates = [o for o in mapping["orgs"] if lower in {g.lower() for g in o.get("github_orgs", {})}]
+        if not candidates and DEFAULT_ORG:
+            return resolve(mapping, owner, DEFAULT_ORG, integration)
         if not candidates:
             return None, None, None, (f"GitHub owner '{owner}' is not mapped to a Snyk org in references/snyk-orgs.json; "
-                                      "pass --org-id, or add the owner to the mapping")
+                                      "pass --org-id, set SNYK_ORG, or add the owner to the mapping")
         if len(candidates) > 1:
             return None, None, None, f"'{owner}' maps to several Snyk orgs ({[o['slug'] for o in candidates]}); pass --org-id"
     org = candidates[0]
@@ -586,7 +604,7 @@ def main():
     p.add_argument("--max-pages", type=int, default=5, help="project pages (100 each) sampled per org")
     p.set_defaults(fn=cmd_refresh)
     p = sub.add_parser("import")
-    p.add_argument("--org-id", help="Snyk org id or slug; default: resolved per repo from the mapping")
+    p.add_argument("--org-id", help="Snyk org id or slug; default: resolved per repo from the mapping, else SNYK_ORG (brightsheets)")
     p.add_argument("--integration", choices=SCM_TYPES, help="force an integration type")
     p.add_argument("--plan"); p.add_argument("--repo"); p.add_argument("--branch")
     p.add_argument("--exclude", default=DEFAULT_EXCLUDES)

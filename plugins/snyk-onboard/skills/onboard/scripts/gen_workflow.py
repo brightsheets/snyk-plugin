@@ -4,8 +4,10 @@
 Usage:
   detect_stack.py --path . > stack.json
   gen_workflow.py stack.json [--severity high] [--org <snyk-org-slug>] > .github/workflows/snyk.yml
+
+  --org defaults to $SNYK_ORG, else "brightsheets" (https://app.snyk.io/org/brightsheets).
 """
-import argparse, json
+import argparse, json, os
 
 SETUP = {
     "javascript": "      - uses: actions/setup-node@v4\n        with: { node-version: 'lts/*' }\n      - run: npm ci --ignore-scripts || yarn install --frozen-lockfile || pnpm install --frozen-lockfile\n",
@@ -23,7 +25,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stack")
     ap.add_argument("--severity", default="high", choices=["low", "medium", "high", "critical"])
-    ap.add_argument("--org", help="Snyk org slug (otherwise CLI default org)")
+    ap.add_argument("--org", default=os.environ.get("SNYK_ORG", "brightsheets"),
+                    help="Snyk org slug (default: $SNYK_ORG, else brightsheets)")
     a = ap.parse_args()
     s = json.load(open(a.stack))
     prod = s["snyk_products"]

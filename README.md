@@ -18,3 +18,5 @@ A Claude Code plugin marketplace.
 1. Sign in: `gh auth login` and `snyk auth`.
 2. Fill the Snyk org list: `python3 plugins/snyk-onboard/skills/onboard/scripts/snyk_import.py refresh-orgs`
 3. Onboard a repo: `/snyk-onboard:onboard owner/repo --dry-run`
+
+The default Snyk org is [`brightsheets`](https://app.snyk.io/org/brightsheets). Set `SNYK_ORG` to use another.

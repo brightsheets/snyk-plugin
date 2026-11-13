@@ -65,7 +65,7 @@ allowed-tools: >-
 | `owner/repo` | One GitHub repo, read through the GitHub API (no clone needed to plan). |
 | `path` | A local checkout. |
 | `--org <github-org>` | Every repo in the org. Archived repos, forks and empty repos are skipped. |
-| `--snyk-org <id\|slug>` | Snyk org to import into. If missing, it's looked up from the repo's GitHub owner in `references/snyk-orgs.json`; if the owner isn't there, ask. |
+| `--snyk-org <id\|slug>` | Snyk org to import into. If missing, it's looked up from the repo's GitHub owner in `references/snyk-orgs.json`; if the owner isn't there, the default org `brightsheets` is used (override with `SNYK_ORG`). |
 | `--filter <regex>` | With `--org`, only repos whose `owner/name` matches. |
 | `--severity <level>` | CI failure threshold: `low`, `medium`, `high` (default) or `critical`. |
 | `--no-ci` | Import into Snyk only. Do not open workflow PRs. |
@@ -89,6 +89,8 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 `references/snyk-policy.yaml` is the starting `.snyk` file.
 
 `references/snyk-orgs.json` ships empty. Fill it once with `scripts/snyk_import.py refresh-orgs`.
+
+The default Snyk org is `brightsheets` (https://app.snyk.io/org/brightsheets). Repos whose GitHub owner isn't in the mapping import there, and generated workflows pass `--org=brightsheets`. Set `SNYK_ORG` to use another org.
 
 `references/snyk-orgs.json` lists your Snyk orgs with:
 - its ID, slug and group ID
