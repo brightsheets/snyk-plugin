@@ -22,8 +22,8 @@ allowed-tools: >-
 
   WHAT IT CHANGES (only after you approve)
   - Go: creates deps-01 if it's missing, and seeds it with a small Go package
-  and tag v0.1.0 if it's missing or empty.
-    empty. Creates snyk-demo-go-N repos, pushes them and tags v0.1.0.
+    and tag v0.1.0 if it's missing or empty. Creates snyk-demo-go-N repos,
+    pushes them and tags v0.1.0.
   - Node/Java: creates snyk-demo-node-N / snyk-demo-java-N, each holding the
     latest code of snyk-labs/nodejs-goof or snyk-labs/java-goof.
   - Adds the topic snyk-demo to each so they're easy to find.
