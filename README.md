@@ -9,6 +9,8 @@ A Claude Code plugin marketplace.
 
 `/snyk-onboard --file repos.txt` reads the repos from a file instead: one per line, `#` for comments.
 
+Go repos get a CI workflow that calls the shared pipeline in [`brightsheets/reusable-workflows`](https://github.com/brightsheets/reusable-workflows): lint, tests, Snyk, and a Docker build + container scan when there's a Dockerfile.
+
 Add `--dry-run` to either one to see the plan without changing anything.
 
 ## Install

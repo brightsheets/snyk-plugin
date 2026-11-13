@@ -173,11 +173,13 @@ Only for repos that use GitHub Actions. For other CI systems, put the equivalent
 
 1. `gh repo clone owner/repo <scratch dir> -- --depth 1`, then `git switch -c snyk-onboarding`.
 2. If the repo has no `.snyk`, copy `references/snyk-policy.yaml` to `.snyk`. Remove exclude globs that don't apply to this repo's stack.
-3. Run `python3 scripts/detect_stack.py --path . > <scratch>/stack.json`, then `python3 scripts/gen_workflow.py <scratch>/stack.json --severity <level> > .github/workflows/snyk.yml`. Read the result back to check it.
+3. Run `python3 scripts/detect_stack.py --path . > <scratch>/stack.json`, then `python3 scripts/gen_workflow.py <scratch>/stack.json --severity <level> --repo-dir . > .github/workflows/snyk.yml`. Read the result back to check it.
+   - **Go repos** get a short caller of `brightsheets/reusable-workflows/.github/workflows/go-ci.yaml@v1`: lint, tests, Snyk Open Source + Code, and a Docker build + Snyk Container scan when there is a Dockerfile. If `go.mod` requires other `brightsheets` modules, the caller also passes `go-private-owners: brightsheets` and the `GO_MODULES_TOKEN` secret.
+   - **Other stacks** get a self-contained Snyk workflow. Pass `--standalone` to get that for a Go repo too.
 4. Show the diff. After approval (one approval covers a whole wave), commit `chore: onboard repo to Snyk`, push the branch, and run `gh pr create`. The PR body lists the detected stack, the Snyk products, the detection notes, and the need for a `SNYK_TOKEN` secret.
 5. Return one line: `owner/repo | PR <url>`, `owner/repo | skipped: <reason>` or `owner/repo | failed: <error>`.
 
-If `gh secret list --org <org>` doesn't show `SNYK_TOKEN`, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. Don't run it yourself.
+If `gh secret list --org <org>` doesn't show `SNYK_TOKEN`, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. For a personal account (like `brightsheets`), secrets are per repo: `gh secret set SNYK_TOKEN --repo <owner/repo>`. Go callers with private modules also need `GO_MODULES_TOKEN`: a fine-grained PAT with read access to those repos' contents. Don't run these yourself.
 
 ### 6. Report
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
