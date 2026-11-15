@@ -46,6 +46,7 @@ Override for one run with `--snyk-org <slug|id>`. Setting `SNYK_ORG` sends every
 | Option | Meaning |
 |---|---|
 | `--no-pr` (or `--no-ci`) | Import into Snyk only, without the `.snyk` PR. |
+| `--no-settings` | Leave the Snyk org's PR-check and fix-PR settings as they are. |
 | `--dry-run` | Show the plan: detected stack, Snyk products, Snyk org and integration per repo. Imports nothing. |
 | `--file <path>` / `@path` | Read repos from a file. |
 | `--org <github-org>` | Every repo in that GitHub org (archived, forks and empty repos skipped). |
