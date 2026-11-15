@@ -112,14 +112,21 @@ The importer reads it, so nobody has to look up IDs. Credentials come from `SNYK
 
 The scripts import through a Snyk org's **existing** GitHub integration. They never create or change an integration: that's a Snyk admin task in Snyk > Settings > Integrations, plus installing the Snyk GitHub App on the GitHub org.
 
+## Showing script output (every run, every step)
+Show what the scripts print the same way every time, so a run always looks like the last one:
+- Put each script's output in your reply **verbatim** inside a ```` ```diff ```` code block, right after running it: every line as printed, in order, nothing reworded, summarised, reordered or dropped (long IDs and URLs included).
+- Pass `--chat` to the scripts that take it (`preflight.py`, `snyk_import.py import`). It prefixes each line so the block shows failures (✗, ❌, `NEXT=` not ready, a failed summary) in red (`-`) and successes (✓, ✅, `NEXT=ready`) in green (`+`).
+- Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
+- Ask questions (AskUserQuestion) only after the block they depend on.
+
 ## Steps
 
 ### 0. Setup, one stage at a time
 Run the setup check from this skill's folder with the same repos:
 ```
-python3 scripts/preflight.py --repo <owner/repo> [--repo …] [--file <path>] [--snyk-org <slug>]
+python3 scripts/preflight.py --repo <owner/repo> [--repo …] [--file <path>] [--snyk-org <slug>] --chat
 ```
-It's read-only except for one thing: if the Snyk MCP server is missing and the snyk CLI is installed, it adds the server to Claude Code at user scope (pass `--no-mcp-add` to skip). It walks these stages in order, stops at the first one that isn't met, prints the fix, and ends with `NEXT=<stage>` (`NEXT=ready` when everything that blocks an import is in place). Handle the stage it names, then run it again; repeat until `NEXT=ready`. Show the user its checklist each time.
+It's read-only except for one thing: if the Snyk MCP server is missing and the snyk CLI is installed, it adds the server to Claude Code at user scope (pass `--no-mcp-add` to skip). It walks these stages in order, stops at the first one that isn't met, prints the fix, and ends with `NEXT=<stage>` (`NEXT=ready` when everything that blocks an import is in place). Handle the stage it names, then run it again; repeat until `NEXT=ready`. Show its output each time as *Showing script output* says.
 
 | `NEXT=` | Stage | What to do |
 |---|---|---|
@@ -130,15 +137,9 @@ It's read-only except for one thing: if the Snyk MCP server is missing and the s
 | `app` | That Snyk org has no GitHub Cloud App integration | Give the user the link it prints and ask them to click Install on GitHub. Offer to wait: rerun with `--wait` (polls every 10 s, up to `--wait-minutes`, default 10) and continue as soon as the install shows up. Installing a GitHub App always needs that one click by the account or org owner; it can't be automated. |
 | `ready` | Everything that blocks an import passes | Go on to step 1. Mention any ⚠️ lines: a missing `SNYK_TOKEN` Actions secret (CI scans are skipped until it's set; give the `gh secret set` command it prints, don't run it) and the Snyk MCP server line: the check adds it automatically once the snyk CLI is installed; when it reports *Added*, tell the user to run `/mcp` or restart Claude Code to load the `mcp__snyk__*` tools. |
 
-**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is rejected, is fine-grained, or lacks a scope): print the check's headline and its indented block **exactly as the check printed them, nothing added, removed or reworded**, in this shape:
+**`GH_APP_ADMIN_TOKEN` warning** (the ⚠️ `app` line saying it isn't set, is rejected, is fine-grained, or lacks a scope): the output block already holds the check's headline and its indented block (the token it needs, the `export` command, and "Then type "done" when it's completed."), exactly as printed. Show that block and nothing else: no summary, no extra steps, no reworded copy of it.
 
-> GH_APP_ADMIN_TOKEN isn't set.
-> - Token: create a new token or use an existing one: … permissions …
-> - On a new shell outside the Claude workspace, run: export GH_APP_ADMIN_TOKEN=<your-token>
->
-> Then type "done" when it's completed.
-
-Then **stop** and wait. Don't ask a question about it and don't continue to step 1. When the user types "done", start again from step 0 (run the check again). If the check still shows the token missing, print the same block again and stop again. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
+Then **stop** and wait. Don't ask a question about it and don't continue to step 1. When the user types "done", start again from step 0 (run the check again). If the check still shows the token missing, show the new output block the same way and stop again. Never ask for the token in the chat; if one is pasted anyway, don't repeat it and tell them to revoke it.
 
 If running `install_tools.sh` is refused, give the user the same command with `!` in front so they can run it themselves. The installer downloads only from the vendors' official release URLs, checks each file against the published SHA-256, and installs nothing on a mismatch. If `~/.local/bin` isn't on `PATH`, it says how to add it.
 
@@ -195,7 +196,7 @@ Every failure comes with recommendations. Examples:
 
 The run ends with a summary and the recommendations grouped by repo count. It exits non-zero if any repo failed.
 
-**Show the importer's output the same way on every run.** Always pass `--chat`, and put its output in your reply **verbatim** inside a ```` ```diff ```` code block, as the first thing after the command: every line as printed, in order, nothing reworded, summarised or dropped (long IDs and URLs included). `--chat` prefixes each line so the block shows ✗ failure lines and a failed summary in red (`-`) and ✓ lines in green (`+`). Explain only after the block, and never restate a failure in your own words before showing it.
+Show the importer's output as *Showing script output* says, for the dry run and the `--apply` run alike.
 
 Steps:
 1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
@@ -236,8 +237,9 @@ Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - follow-ups: switch on Snyk Code in the org, add build tools, tune excludes, and for repos with no reusable-workflow caller, the caller the team should add (`go-ci.yaml@v1` for Go, `js-ci.yaml@v1` for JavaScript); the plugin doesn't add it
 
 ## Rules
-- **No hallucination.** Every statement about GitHub, Snyk, tokens, projects or settings must come from a command run in this invocation; quote or summarize its output, never memory or an earlier run. If a command wasn't run or failed, say exactly that. Never claim a step happened (imported, added to the app, settings changed, PR opened) unless this run's output shows it.
-- **Follow the steps as written.** Run them in order, use the scripts' messages verbatim where a step says so (the GH_APP_ADMIN_TOKEN block), and don't add, skip or reorder steps.
+- **No hallucination.** Every statement about GitHub, Snyk, tokens, projects or settings must come from a command run in this invocation; show its output as printed (*Showing script output*), never memory or an earlier run. If a command wasn't run or failed, say exactly that. Never claim a step happened (imported, added to the app, settings changed, PR opened) unless this run's output shows it.
+- **Follow the steps as written.** Run them in order, and don't add, skip or reorder steps.
+- **Same display every run.** Script output goes in a ```` ```diff ```` block, verbatim, with `--chat` where the script takes it, before any explanation (*Showing script output*). This includes the setup checklist, the GH_APP_ADMIN_TOKEN block, the import dry run and the `--apply` run.
 - Plan first. Writes happen only after the user approves: Snyk imports, branches, pushes, PRs. `--dry-run` writes nothing except the local plan file.
 - Never print, log or commit `SNYK_TOKEN`. Workflows read it only as `${{ secrets.SNYK_TOKEN }}`.
 - Never push to a default branch, merge a PR, enable auto-merge, or change repo or org settings or secrets. Two exceptions, each only after the user approves: with `--apply`, the importer adds approved repos to the Snyk GitHub App's repository access, and `integration-settings --apply` changes the Snyk org's PR-check and fix-PR settings.

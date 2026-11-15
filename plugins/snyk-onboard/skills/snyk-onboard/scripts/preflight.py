@@ -287,8 +287,11 @@ ap.add_argument("--snyk-org", help="Snyk org to use for every repo instead of th
 ap.add_argument("--wait", action="store_true", help="poll until the GitHub Cloud App integration appears")
 ap.add_argument("--wait-minutes", type=float, default=10)
 ap.add_argument("--json", action="store_true")
+ap.add_argument("--chat", action="store_true", help="prefix lines with - / + so a ```diff block shows failures red and passes green")
 ap.add_argument("--no-mcp-add", action="store_true", help="don't add the Snyk MCP server when it's missing")
 args = ap.parse_args()
+if args.chat and not args.json:
+    sys.stdout = si.ChatMarks(sys.stdout)
 
 repos = si.split_repos(args.repo, args.file)
 owners = sorted({r.split("/")[0] for r in repos}, key=str.lower)

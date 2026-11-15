@@ -62,5 +62,8 @@ allowed-tools: >-
 If the user picks *Skip*, say `/snyk-onboard` still works with the `snyk` CLI and its scripts.
 
 ## Rules
+- **No hallucination.** Report only what this run's commands returned (`check_snyk_mcp.sh`, `claude mcp add`, `claude mcp get`), never memory or an earlier run.
+- **Same display every run.** Show each command's output verbatim in a ```` ```diff ```` code block right after running it, nothing reworded or dropped; explain only after the block, and ask questions only after it.
+- Never print a Snyk token.
 - Never install without an explicit yes, and add nothing but the `snyk` server.
 - Never remove or change other MCP servers.

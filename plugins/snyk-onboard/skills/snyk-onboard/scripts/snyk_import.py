@@ -305,8 +305,11 @@ class ChatMarks:
         self.buf += text
         while "\n" in self.buf:
             line, self.buf = self.buf.split("\n", 1)
-            mark = "-" if ("✗" in line or "!!!" in line or line.startswith("Summary: ") and "failed=" in line) else \
-                   "+" if "✓" in line else " "
+            bad = ("✗" in line or "❌" in line or "!!!" in line
+                   or (line.startswith("Summary: ") and "failed=" in line)
+                   or (line.startswith("NEXT=") and line != "NEXT=ready"))
+            good = "✓" in line or "✅" in line or line == "NEXT=ready"
+            mark = "-" if bad else "+" if good else " "
             self.out.write(f"{mark} {line}\n" if line else "\n")
     def flush(self):
         if self.buf:
