@@ -133,7 +133,7 @@ def caller_text(repo, dest, pms, d, reusable):
         if owners:
             lines.append("      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}")
         return "\n".join(lines) + "\n"
-    if pms & {"npm", "yarn", "pnpm"}:
+    if "npm" in pms and os.path.exists(os.path.join(dest, "package-lock.json")):
         node = None
         try:
             node = (json.load(open(os.path.join(dest, "package.json"))).get("engines") or {}).get("node")
@@ -144,8 +144,6 @@ def caller_text(repo, dest, pms, d, reusable):
         lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v1", "    with:", f"      snyk-org: {owner}"]
         if node:
             lines.append(f'      node-version: "{node}"')
-        if os.path.exists(os.path.join(dest, "pnpm-lock.yaml")):
-            lines.append("      pnpm: true")
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
         return "\n".join(lines) + "\n"
     return None  # no Snyk reusable workflow for this stack
@@ -206,7 +204,7 @@ def one(repo, plan, apply, reusable_override=None):
             for line in wf.splitlines():
                 print(f"    + {line}")
         else:
-            caller_note = "no Snyk reusable workflow for this stack (Go and JavaScript only)"
+            caller_note = "no Snyk reusable workflow for this stack (Go, or npm with a package-lock.json)"
     if not expected:
         return "skip", f"– {repo} | skipped: nothing to add ({caller_note})"
     run("git", "add", *expected, cwd=dest)

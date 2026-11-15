@@ -101,7 +101,7 @@ def main():
             adds.append(".snyk")
         if not sp.reusable_ci(repo) and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
             pms = {p for e in (d.get("ecosystems") or {}).values() for p in e.get("package_managers") or []}
-            stack = "go" if "gomodules" in pms else "js" if pms & {"npm", "yarn", "pnpm"} else None
+            stack = "go" if "gomodules" in pms else "js" if "npm" in pms and "package-lock.json" in (d.get("manifest_files") or []) else None
             if stack and sp.reusable_repo(repo.split("/", 1)[0], a.reusable):
                 adds.append(f"snyk.yml ({stack}-snyk)")
         d["pr_adds"] = adds
