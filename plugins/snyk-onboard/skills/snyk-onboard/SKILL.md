@@ -95,7 +95,7 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 |---|---|---|
 | `scripts/snyk_pr.py --repo <repo…> --plan <plan.json> [--apply] [--chat]` | Step 5: one PR per repo adding `.snyk` and, if missing, a Snyk-only caller workflow for the stack, safely (new temp folder, fresh branch, plain push, PR checked) | branches and PRs, with `--apply` |
 | `scripts/summary_table.py --import-log <log> [--pr-log <log>] [--settings …]` | Step 6: the final summary table (one row per repo: import, projects, settings, `.snyk` PR, result), built from this run's logs | nothing |
-| `scripts/plan_table.py --repo <repo…> [--file …] [--snyk-org …] [--json <path>]` | Steps 1–3 in one quiet run: detects each repo, resolves its Snyk org, prints the plan table, then the skipped and stopped repos | the `--json` file only |
+| `scripts/plan_table.py --repo <repo…> [--file …] [--snyk-org …] [--json <path>]` | Steps 1–3 in one quiet run: detects each repo, resolves its Snyk org, works out what the PR will add, and draws the plan box, then the skipped and stopped repos (`--markdown` for a Markdown table) | the `--json` file only |
 | `scripts/detect_stack.py --path <dir>` or `--github owner/repo` | Detects the stack and maps it to Snyk products (raw JSON; used by `plan_table.py`) | nothing |
 | `scripts/scan_org.py --org <org> --out <plan.json>` | Runs detection on every repo in an org, writes a plan | the plan file only |
 | `scripts/snyk_import.py orgs` | Lists the Snyk orgs the token can see | nothing |
@@ -122,7 +122,7 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
 - Put each script's output in your reply **verbatim** inside a ```` ```diff ```` code block, right after running it: every line as printed, in order, nothing reworded, summarised, reordered or dropped (long IDs and URLs included).
-- **Two exceptions.** The plan: paste `plan_table.py`'s output as-is, *not* in a code block, so it renders as a table. The final summary: `summary_table.py` draws its own box; paste its output as-is inside a plain ```` ``` ```` code block (not `diff`), so the box lines up in any terminal. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
+- **Two exceptions, the plan and the final summary:** `plan_table.py` and `summary_table.py` draw their own boxes. Paste each one's output as-is inside a plain ```` ``` ```` code block (not `diff`), so the box lines up the same in every terminal. This is the standard display for both, every run. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
 - Show only what the steps here run. No extra checks, listings or JSON dumps.
 - Pass `--chat` to the scripts that take it (`preflight.py`, `snyk_import.py import`). It prefixes each line so the block shows failures (✗, ❌, `NEXT=` not ready, a failed summary) in red (`-`) and successes (✓, ✅, `NEXT=ready`) in green (`+`).
 - Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
@@ -208,7 +208,7 @@ Pass every entry in detection's `notes` on to the user. For example:
    - **No Snyk org with the owner's name:** show `snyk_import.py orgs` and tell the user to create a Snyk org named like the GitHub org (or pass `--snyk-org`). Don't import into a different org on your own. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
    - **No GitHub integration in that org:** stop and say a Snyk admin must add one.
 2. If `references/snyk-orgs.json` is more than about 90 days old (`generated`), or an ID is rejected, run `refresh-orgs` and show the diff.
-3. Show `plan_table.py`'s output as-is (the table, then *Skipped* / *Stopped*), with detection notes in its Notes column. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
+3. Show `plan_table.py`'s output as-is in a plain code block: the drawn box (Repo, Branch, Products, Ecosystems, CI, Snyk org, **PR adds**, Notes), then *Skipped* / *Stopped*. **PR adds** says what step 5 will add to each repo: `.snyk`, `snyk.yml (js-snyk)` / `snyk.yml (go-snyk)`, both, or nothing. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
 4. **`--dry-run` stops here.** Otherwise ask for approval with AskUserQuestion. Nothing has been written yet. Say in the question that approving also (a) turns on Snyk's fix and upgrade PRs on each Snyk org's GitHub integration, for all its repos (unless `--no-settings`), and (b) opens one PR per repo adding `.snyk` and, where no workflow calls the reusable workflows, a Snyk-only caller workflow `.github/workflows/snyk.yml` (unless `--no-pr`). PR checks are optional and get their own yes/no question in step 4b.
 
 ### 4. Import into Snyk

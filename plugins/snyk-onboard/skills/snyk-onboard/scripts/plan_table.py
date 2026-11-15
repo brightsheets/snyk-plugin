@@ -11,6 +11,8 @@ import argparse, concurrent.futures, json, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detect_stack as ds  # noqa: E402
+import snyk_pr as sp  # noqa: E402
+from summary_table import box  # noqa: E402
 import snyk_import as si  # noqa: E402
 
 PRODUCTS = [("open_source", "Open Source"), ("code", "Code"), ("container", "Container"), ("iac", "IaC")]
@@ -58,6 +60,8 @@ def main():
     ap.add_argument("--file", action="append")
     ap.add_argument("--snyk-org")
     ap.add_argument("--json", help="save detection + resolve results here")
+    ap.add_argument("--markdown", action="store_true", help="print a Markdown table instead of the drawn box")
+    ap.add_argument("--reusable", help="owner/repo of the shared reusable workflows (default: <repo owner>/reusable-workflows)")
     a = ap.parse_args()
 
     repos = si.split_repos(a.repo, a.file or [])
@@ -92,16 +96,28 @@ def main():
         data.append(d)
         if not iid:
             stopped.append((repo, "resolve", why)); continue
+        adds = []
+        if sp.gh_json("api", f"repos/{repo}/contents/.snyk") is None:
+            adds.append(".snyk")
+        if not sp.reusable_ci(repo) and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
+            pms = {p for e in (d.get("ecosystems") or {}).values() for p in e.get("package_managers") or []}
+            stack = "go" if "gomodules" in pms else "js" if pms & {"npm", "yarn", "pnpm"} else None
+            if stack and sp.reusable_repo(repo.split("/", 1)[0], a.reusable):
+                adds.append(f"snyk.yml ({stack}-snyk)")
+        d["pr_adds"] = adds
         rows.append([repo, d["branch"], products(d), ecosystems(d),
                      ", ".join(label(c, CI) for c in d.get("ci_systems") or []) or "none",
-                     f"{org['slug']} ({label(itype, ITYPE)})", "; ".join(d.get("notes") or []) or "none"])
+                     f"{org['slug']} ({label(itype, ITYPE)})", " + ".join(adds) or "nothing (has both)",
+                     "; ".join(d.get("notes") or []) or "none"])
 
-    head = ["Repo", "Branch", "Products", "Ecosystems", "CI", "Snyk org", "Notes"]
-    if rows:
+    head = ["Repo", "Branch", "Products", "Ecosystems", "CI", "Snyk org", "PR adds", "Notes"]
+    if rows and a.markdown:
         print("| " + " | ".join(head) + " |")
         print("|" + "|".join("---" for _ in head) + "|")
         for r in rows:
             print("| " + " | ".join(cell(x) for x in r) + " |")
+    elif rows:
+        print(box(head, rows, width=22))
     else:
         print("No repos in the plan.")
     print()
