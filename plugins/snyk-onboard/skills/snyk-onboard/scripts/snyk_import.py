@@ -290,6 +290,32 @@ def highlight(msg):
     return f"     !!! {msg} !!!"
 
 
+def hl(msg):
+    """Inline red highlight on a TTY (like the onboarding page's red badge); plain text otherwise."""
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        return f"\033[1;41;97m {msg} \033[0m"
+    return msg
+
+
+class ChatMarks:
+    """--chat: prefix every line so a ```diff block shows failures red (-) and successes green (+)."""
+    def __init__(self, out):
+        self.out, self.buf = out, ""
+    def write(self, text):
+        self.buf += text
+        while "\n" in self.buf:
+            line, self.buf = self.buf.split("\n", 1)
+            mark = "-" if ("✗" in line or "!!!" in line or line.startswith("Summary: ") and "failed=" in line) else \
+                   "+" if "✓" in line else " "
+            self.out.write(f"{mark} {line}\n" if line else "\n")
+    def flush(self):
+        if self.buf:
+            self.write("\n")
+        self.out.flush()
+    def isatty(self):
+        return False
+
+
 def app_access_fixes(owner, name, detail="", settings_url=None):
     """Fixes for when the script can't confirm or grant the Snyk app's access to owner/name."""
     url = settings_url or (f"https://github.com/organizations/{owner}/settings/installations"
@@ -428,6 +454,39 @@ def go_private_deps(owner, name, branch=None):
     return deps
 
 
+def go_cross_org_private(owner, name, branch=None):
+    """Private GitHub repos in OTHER orgs that owner/name's go.mod requires (the Snyk app on owner can't read them)."""
+    ref = f"?ref={branch}" if branch else ""
+    status, data = gh("GET", f"repos/{owner}/{name}/contents/go.mod{ref}", os.environ.get("GH_APP_ADMIN_TOKEN"))
+    if status != 200 or not data or "content" not in data:
+        return []
+    import base64
+    text = base64.b64decode(data["content"]).decode(errors="replace")
+    found = []
+    for line in text.splitlines():
+        line = line.split("//", 1)[0]
+        if line.strip().startswith("module "):
+            continue
+        for m in re.finditer(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", line):
+            o, r = m.group(1), m.group(2)
+            if o.lower() == owner.lower() or f"{o}/{r}" in found:
+                continue
+            st, info = gh("GET", f"repos/{o}/{r}")
+            if st == 200 and isinstance(info, dict) and info.get("private"):
+                found.append(f"{o}/{r}")
+    return found
+
+
+def cross_org_fixes(owners):
+    pat = ",".join(f"github.com/{o}/*" for o in owners)
+    return [
+        f"Scan Go deps in CI, where credentials exist: the reusable go-ci.yaml with go-private-owners: {', '.join(owners)} "
+        f"(GOPRIVATE={pat}) and a GO_MODULES_TOKEN secret that can read them.",
+        "Keep the Git integration for PR checks, fix PRs and Snyk Code.",
+        "Or move the private module into the same GitHub org.",
+    ]
+
+
 # ---------- feedback ----------
 
 def recommend(status, text, ctx):
@@ -466,6 +525,9 @@ def recommend(status, text, ctx):
         recs.append("Rate limited: raise --delay and import in smaller waves.")
     if status >= 500:
         recs.append("Snyk server error: retry later; if it repeats, open a Snyk support ticket with the job URL.")
+    if "private dependencies" in t:
+        recs.append("Snyk couldn't read a private dependency: scan it in CI with credentials (Go: GOPRIVATE and a "
+                    "GO_MODULES_TOKEN in the reusable go-ci.yaml), or give the Snyk app access to it if it's in the same org.")
     if "no supported" in t or "no projects" in t or "manifest" in t:
         recs.append("Snyk found no supported manifests: check detect_stack.py's output. Code-only repos need Snyk Code "
                     f"switched on in '{slug}' (Settings > Snyk Code).")
@@ -669,6 +731,8 @@ def cmd_integration_settings(a):
 
 
 def cmd_import(a):
+    if getattr(a, "chat", False):
+        sys.stdout = ChatMarks(sys.stdout)
     if a.plan:
         plan = json.load(open(a.plan))
         targets = plan["targets"]
@@ -762,8 +826,8 @@ def cmd_import(a):
                 rec["projects"] = [{"target": n, "ok": ok, "message": m} for n, ok, m in outcomes]
                 good = [o for o in outcomes if o[1]]
                 bad = [o for o in outcomes if not o[1]]
-                for n, _ok, m in good:
-                    print(f"       ✓ {n}: {m}")
+                for n, ok, m in outcomes:
+                    print(f"       {'✓' if ok else '✗'} {n}: {m}")
                 if state == "still-pending":
                     rec["result"] = "pending"
                     print(f"       … still running after {a.wait_timeout}s; check {job} later")
@@ -771,8 +835,8 @@ def cmd_import(a):
                     msgs = "; ".join(m for _n, _ok, m in bad) or f"job {state}, no projects created"
                     go_failed = [n for n, _ok, m in bad if n.endswith("go.mod")]
                     deps = go_private_deps(t["owner"], t["name"], t.get("branch")) if go_failed else []
+                    xorg = go_cross_org_private(t["owner"], t["name"], t.get("branch")) if go_failed and not deps else []
                     if deps and itype == "github-cloud-app":
-                        print(f"       ✗ {', '.join(go_failed)}: {msgs[:200]}")
                         print(f"       ⓘ go.mod requires private modules from {t['owner']}: {', '.join(deps)}")
                         print(f"         Snyk resolves Go modules through the GitHub App, so it needs read access to those repos too.")
                         if a.fix_deps:
@@ -801,11 +865,16 @@ def cmd_import(a):
                             f"Give the Snyk GitHub App read access to {', '.join(t['owner'] + '/' + d for d in deps)}: rerun with "
                             f"`--apply --fix-deps`, or add them at {snyk_app_installation(t['owner']).get('settings_url', 'the app installation settings')}.",
                             f"Or scan Go in CI instead: set GOPRIVATE=github.com/{t['owner']}/* and a token with read access, then "
-                            "`snyk monitor` (the generated workflow's open-source job).",
+                            "`snyk monitor` (the reusable go-ci.yaml with go-private-owners).",
                         ]
                         fail(rec, repo, "go.mod import blocked: private cross-repo modules are forbidden to Snyk", deps_recs)
+                    elif xorg:
+                        print(f"       ⓘ go.mod requires private modules from another GitHub org: {', '.join(xorg)}")
+                        print(f"         The Snyk app installed on {t['owner']} can't read them, so go.mod can't be resolved.")
+                        fail(rec, repo, f"import finished with errors: {hl(msgs[:300])}",
+                             cross_org_fixes(sorted({x.split('/')[0] for x in xorg})))
                     else:
-                        fail(rec, repo, f"import finished with errors: {msgs[:300]}", recommend(0, msgs, ctx))
+                        fail(rec, repo, f"import finished with errors: {hl(msgs[:300])}", recommend(0, msgs, ctx))
                 else:
                     rec["result"] = "imported"
             time.sleep(a.delay)
@@ -854,6 +923,8 @@ def main():
                    help="when a go.mod import is forbidden, add the same-org module repos to the Snyk GitHub App and retry")
     p.add_argument("--no-wait", action="store_true", help="don't wait for import jobs to finish")
     p.add_argument("--wait-timeout", type=int, default=300, help="seconds to wait per import job")
+    p.add_argument("--chat", action="store_true",
+                   help="prefix lines with - / + so a ```diff block shows failures red and successes green")
     p.add_argument("--apply", action="store_true",
                    help="actually import, and add repos to the Snyk GitHub App (default is dry run)")
     p.set_defaults(fn=cmd_import)

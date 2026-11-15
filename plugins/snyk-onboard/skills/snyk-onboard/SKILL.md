@@ -187,6 +187,7 @@ Every failure comes with recommendations. Examples:
 - **403:** the Snyk role needed in that org.
 - **404:** the repo isn't visible to the integration; the fix differs for the GitHub App, OAuth and GitHub Enterprise integrations.
 - **SAML/SSO blocks:** authorize the integration's token for the org.
+- **Go repos with private modules in another GitHub org ("Unable to fetch private dependencies"):** it names the cross-org private modules (`ⓘ go.mod requires private modules from another GitHub org: …`) and recommends scanning Go deps in CI with the reusable `go-ci.yaml` (`go-private-owners`, `GO_MODULES_TOKEN`), keeping the Git integration for PR checks, fix PRs and Snyk Code, or moving the module into the same org. `--fix-deps` can't help here.
 - **Go repos with private cross-repo modules (403 on `go.mod`):** it reads `go.mod`, names the same-org module repos the Snyk app can't read, and recommends granting the app access to them. With `--fix-deps` it adds them to the app and retries once; the alternative is scanning Go in CI with `GOPRIVATE`.
 - **Stale integration IDs:** run `refresh-orgs`.
 - **No supported manifests:** check detection, or switch on Snyk Code.
@@ -194,9 +195,11 @@ Every failure comes with recommendations. Examples:
 
 The run ends with a summary and the recommendations grouped by repo count. It exits non-zero if any repo failed.
 
+**Show the importer's output the same way on every run.** Always pass `--chat`, and put its output in your reply **verbatim** inside a ```` ```diff ```` code block, as the first thing after the command: every line as printed, in order, nothing reworded, summarised or dropped (long IDs and URLs included). `--chat` prefixes each line so the block shows ✗ failure lines and a failed summary in red (`-`) and ✓ lines in green (`+`). Explain only after the block, and never restate a failure in your own words before showing it.
+
 Steps:
-1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
-2. Tell the user in the plan that `--apply` will both add repos to the Snyk GitHub App installation and import them. Run with `--apply` only after they confirm that wave. Pass `--no-grant-app` if they want imports only. If a Go import fails on private modules, ask before rerunning with `--fix-deps`: it grants the app access to more repos than the ones in the plan.
+1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
+2. Tell the user in the plan that `--apply` will both add repos to the Snyk GitHub App installation and import them. Run with `--apply --chat` only after they confirm that wave. Pass `--no-grant-app` if they want imports only. If a Go import fails on private modules, ask before rerunning with `--fix-deps`: it grants the app access to more repos than the ones in the plan.
 3. Show the summary and every recommendation. Don't retry a failed repo until the cause is fixed. Keep `snyk-import-log.json` for the report.
 
 ### 4b. PR checks and fix PRs (after a successful import)
