@@ -124,9 +124,9 @@ def caller_text(repo, dest, pms, d, reusable):
     if "gomodules" in pms:
         xorg = si.go_cross_org_private(owner, repo.split("/", 1)[1], d.get("branch"))
         owners = sorted({x.split("/")[0] for x in xorg})
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/go-snyk.yaml@v2 (Open Source + Code).",
+        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/go-snyk.yaml@v3 (Open Source + Code).",
                  "# Needs secret SNYK_TOKEN" + (f", and GO_MODULES_TOKEN (read access to {', '.join(xorg)})." if owners else ".")]
-        lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v2", "    with:", f"      snyk-org: {owner}"]
+        lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v3", "    with:", f"      snyk-org: {owner}"]
         if owners:
             lines.append(f"      go-private-owners: {','.join(owners)}")
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
@@ -139,9 +139,9 @@ def caller_text(repo, dest, pms, d, reusable):
             node = (json.load(open(os.path.join(dest, "package.json"))).get("engines") or {}).get("node")
         except (OSError, ValueError):
             pass
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/js-snyk.yaml@v2 (Open Source + Code).",
+        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/js-snyk.yaml@v3 (Open Source + Code).",
                  "# Needs secret SNYK_TOKEN."]
-        lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v2", "    with:", f"      snyk-org: {owner}"]
+        lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v3", "    with:", f"      snyk-org: {owner}"]
         if node:
             lines.append(f'      node-version: "{node}"')
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
@@ -226,7 +226,7 @@ def one(repo, plan, apply, reusable_override=None):
     products = ", ".join((d.get("snyk_products") or {}).keys()) or "see detection"
     body = ("Onboards this repo to Snyk.\n\n"
             + ("- **`.snyk`**: Snyk policy with excludes for this stack.\n" if ".snyk" in expected else "")
-            + (f"- **`{CALLER}`**: a Snyk-only workflow calling the shared `{reusable}` Snyk scan for this stack at `@v2` (Open Source + Code on every PR, "
+            + (f"- **`{CALLER}`**: a Snyk-only workflow calling the shared `{reusable}` Snyk scan for this stack at `@v3` (Open Source + Code on every PR, "
                "one PR comment, merge gate on high findings). Needs the `SNYK_TOKEN` secret.\n" if CALLER in expected else "")
             + f"- **Snyk products:** {products}\n"
             + f"- **Detection notes:** {'; '.join(d.get('notes') or []) or 'none'}\n"
