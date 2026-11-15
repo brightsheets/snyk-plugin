@@ -111,7 +111,7 @@ def reusable_repo(owner, override=None):
 
 
 def caller_text(repo, dest, pms, d, reusable):
-    """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v2.
+    """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v3.
     No build, tests or Docker: just Snyk Open Source + Code, the PR comment and the merge gate."""
     owner = repo.split("/", 1)[0]
     head = ["name: Snyk", "on:", "  push:", '    branches: [main, "hotfix/**"]', "  pull_request:",
