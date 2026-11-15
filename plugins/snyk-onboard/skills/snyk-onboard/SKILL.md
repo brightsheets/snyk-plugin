@@ -92,6 +92,7 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 | Script | What it does | Writes |
 |---|---|---|
 | `scripts/snyk_pr.py --repo <repo…> --plan <plan.json> [--apply] [--chat]` | Step 5: opens a `.snyk`-only PR per repo, safely (new temp folder, fresh branch, plain push, PR checked) | branches and PRs, with `--apply` |
+| `scripts/summary_table.py --import-log <log> [--pr-log <log>] [--settings …]` | Step 6: the final summary table (one row per repo: import, projects, settings, `.snyk` PR, result), built from this run's logs | nothing |
 | `scripts/plan_table.py --repo <repo…> [--file …] [--snyk-org …] [--json <path>]` | Steps 1–3 in one quiet run: detects each repo, resolves its Snyk org, prints the plan table, then the skipped and stopped repos | the `--json` file only |
 | `scripts/detect_stack.py --path <dir>` or `--github owner/repo` | Detects the stack and maps it to Snyk products (raw JSON; used by `plan_table.py`) | nothing |
 | `scripts/scan_org.py --org <org> --out <plan.json>` | Runs detection on every repo in an org, writes a plan | the plan file only |
@@ -119,7 +120,7 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
 - Put each script's output in your reply **verbatim** inside a ```` ```diff ```` code block, right after running it: every line as printed, in order, nothing reworded, summarised, reordered or dropped (long IDs and URLs included).
-- **One exception, the plan:** paste `plan_table.py`'s output as-is, *not* in a code block, so it renders as the standard plan table. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
+- **Two exceptions, the plan and the final summary:** paste `plan_table.py`'s and `summary_table.py`'s output as-is, *not* in a code block, so they render as tables. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
 - Show only what the steps here run. No extra checks, listings or JSON dumps.
 - Pass `--chat` to the scripts that take it (`preflight.py`, `snyk_import.py import`). It prefixes each line so the block shows failures (✗, ❌, `NEXT=` not ready, a failed summary) in red (`-`) and successes (✓, ✅, `NEXT=ready`) in green (`+`).
 - Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
@@ -232,7 +233,7 @@ The run ends with a summary and the recommendations grouped by repo count. It ex
 Show the importer's output as *Showing script output* says, for the dry run and the `--apply` run alike.
 
 Steps:
-1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
+1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. (The `--apply` run adds `--log <scratch>/snyk-import-log.json`, which step 6 reads.) This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
 2. Tell the user in the plan that `--apply` will both add repos to the Snyk GitHub App installation and import them. Run with `--apply --chat` only after they confirm that wave. Pass `--no-grant-app` if they want imports only. If a Go import fails on private modules, ask before rerunning with `--fix-deps`: it grants the app access to more repos than the ones in the plan.
 3. Show the output, summary and recommendations included. A repo that failed or was only partly imported stops here; the repos that imported fully go on to 4b and 5 (*Stop on failure: per repo*). Keep `snyk-import-log.json`.
 
@@ -257,7 +258,7 @@ With `--no-settings` or `--dry-run`, run the same command without `--apply` (rea
 Run **one script** for all the fully imported repos. Don't write your own shell for this step: no hand-made clone, branch, `rm`, `set -e`, shell functions or loops.
 
 ```
-python3 scripts/snyk_pr.py --repo <fully imported repos…> --plan <scratch>/plan.json --apply --chat
+python3 scripts/snyk_pr.py --repo <fully imported repos…> --plan <scratch>/plan.json --apply --chat --log <scratch>/pr-log.json
 ```
 
 It does, per repo, the same way every run:
@@ -274,7 +275,15 @@ Without `--apply` it only shows what it would do (use that with `--dry-run`).
 
 The reusable workflows read the `SNYK_TOKEN` secret. If `gh secret list --org <org>` doesn't show it, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. For a personal account (like `brightsheets`), secrets are per repo: `gh secret set SNYK_TOKEN --repo <owner/repo>`. Go callers with private modules also need `GO_MODULES_TOKEN`: a fine-grained PAT with read access to those repos' contents. Don't run these yourself.
 
-### 6. Report (unless the whole run stopped)
+### 6. Final summary and report (unless the whole run stopped)
+End every run with the summary table, built from this run's logs:
+
+```
+python3 scripts/summary_table.py --import-log <scratch>/snyk-import-log.json --pr-log <scratch>/pr-log.json --settings <applied|unchanged|not-run|failed|shown>
+```
+
+`--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`. Paste its output as-is so it renders as a table: one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Result), then `Done: n · Stopped: n · Skipped: n`. That table is the last thing the run shows, followed by one line with the report's path.
+
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - the repos imported, with their Snyk org
 - PR links, and whether each repo already calls the reusable workflows

@@ -15,7 +15,7 @@ Never touches .github/workflows/, never force-pushes, never deletes a branch, fo
 No shell is used: every command runs as an argument list.
 Exit code 0 when no repo failed (skips are fine), 1 otherwise.
 """
-import argparse, concurrent.futures, json, os, subprocess, sys, tempfile, time
+import argparse, concurrent.futures, json, os, re, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -161,6 +161,7 @@ def main():
     ap.add_argument("--plan", help="plan.json from plan_table.py --json (stack data for the excludes)")
     ap.add_argument("--apply", action="store_true", help="push and open the PRs (default: show only)")
     ap.add_argument("--chat", action="store_true", help="prefix lines with - / + for a ```diff block")
+    ap.add_argument("--log", help="write one JSON record per repo here (used by summary_table.py)")
     a = ap.parse_args()
     if a.chat:
         sys.stdout = si.ChatMarks(sys.stdout)
@@ -183,10 +184,17 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(repos)))) as ex:
         done = list(ex.map(work, repos))
-    for status, line, out in done:
+    records = []
+    for repo, (status, line, out) in zip(repos, done):
         sys.stdout.write(out)
         counts[status] += 1
         lines.append(line)
+        url = re.search(r"PR (https://\S+)", line)
+        why = re.search(r"\| (?:skipped|failed): (.*)$", line)
+        records.append({"repo": repo, "status": status, "url": url and url.group(1),
+                        "reason": why and why.group(1), "applied": a.apply})
+    if a.log:
+        json.dump(records, open(a.log, "w"), indent=2)
     print()
     for line in lines:
         print(line)
