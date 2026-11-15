@@ -111,7 +111,7 @@ def reusable_repo(owner, override=None):
 
 
 def caller_text(repo, dest, pms, d, reusable):
-    """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v1.
+    """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v2.
     No build, tests or Docker: just Snyk Open Source + Code, the PR comment and the merge gate."""
     owner = repo.split("/", 1)[0]
     head = ["name: Snyk", "on:", "  push:", '    branches: [main, "hotfix/**"]', "  pull_request:",
@@ -226,7 +226,7 @@ def one(repo, plan, apply, reusable_override=None):
     products = ", ".join((d.get("snyk_products") or {}).keys()) or "see detection"
     body = ("Onboards this repo to Snyk.\n\n"
             + ("- **`.snyk`**: Snyk policy with excludes for this stack.\n" if ".snyk" in expected else "")
-            + (f"- **`{CALLER}`**: a Snyk-only workflow calling the shared `{reusable}` Snyk scan for this stack at `@v1` (Open Source + Code on every PR, "
+            + (f"- **`{CALLER}`**: a Snyk-only workflow calling the shared `{reusable}` Snyk scan for this stack at `@v2` (Open Source + Code on every PR, "
                "one PR comment, merge gate on high findings). Needs the `SNYK_TOKEN` secret.\n" if CALLER in expected else "")
             + f"- **Snyk products:** {products}\n"
             + f"- **Detection notes:** {'; '.join(d.get('notes') or []) or 'none'}\n"
