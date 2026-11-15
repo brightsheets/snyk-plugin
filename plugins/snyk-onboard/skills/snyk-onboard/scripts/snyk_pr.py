@@ -15,7 +15,7 @@ Never touches .github/workflows/, never force-pushes, never deletes a branch, fo
 No shell is used: every command runs as an argument list.
 Exit code 0 when no repo failed (skips are fine), 1 otherwise.
 """
-import argparse, json, os, subprocess, sys, tempfile, time
+import argparse, concurrent.futures, json, os, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -164,15 +164,27 @@ def main():
     a = ap.parse_args()
     if a.chat:
         sys.stdout = si.ChatMarks(sys.stdout)
+    si.ROUTER.out = sys.stdout
+    sys.stdout = si.ROUTER
     plan = json.load(open(a.plan)) if a.plan else []
     repos = si.split_repos(a.repo, a.file or [])
     print(f"{'APPLY' if a.apply else 'DRY RUN'}: .snyk PRs for {len(repos)} repo(s)")
     counts, lines = {"ok": 0, "skip": 0, "fail": 0}, []
-    for repo in repos:
+
+    def work(repo):
+        si.ROUTER.local.buf = []
         try:
             status, line = one(repo, plan, a.apply)
-        except RuntimeError as e:
+        except Exception as e:
             status, line = "fail", f"✗ {repo} | failed: {e}"
+        out = "".join(si.ROUTER.local.buf)
+        si.ROUTER.local.buf = None
+        return status, line, out
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(repos)))) as ex:
+        done = list(ex.map(work, repos))
+    for status, line, out in done:
+        sys.stdout.write(out)
         counts[status] += 1
         lines.append(line)
     print()

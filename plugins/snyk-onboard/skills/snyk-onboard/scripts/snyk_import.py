@@ -29,7 +29,7 @@ Env:
   SNYK_ORG     Snyk org (id or slug) for every unmapped owner. Unset: the Snyk org named like the GitHub owner
   SNYK_API     API base, default https://api.snyk.io  (EU: https://api.eu.snyk.io, AU: https://api.au.snyk.io)
 """
-import argparse, collections, datetime, json, os, re, subprocess, sys, time
+import argparse, collections, concurrent.futures, datetime, json, os, re, subprocess, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 API = os.environ.get("SNYK_API", "https://api.snyk.io").rstrip("/")
@@ -289,6 +289,28 @@ def highlight(msg):
         return f"     \033[1;41;97m {msg} \033[0m"
     return f"     !!! {msg} !!!"
 
+
+
+class _Router:
+    """sys.stdout that buffers per thread while a worker has a buffer, else writes through."""
+    def __init__(self):
+        self.local = threading.local()
+    def _out(self):
+        return sys.__stdout__ if getattr(self, "out", None) is None else self.out
+    def write(self, text):
+        buf = getattr(self.local, "buf", None)
+        if buf is not None:
+            buf.append(text)
+        else:
+            self._out().write(text)
+    def flush(self):
+        if getattr(self.local, "buf", None) is None:
+            self._out().flush()
+    def isatty(self):
+        return self._out().isatty()
+
+
+ROUTER = _Router()
 
 def hl(msg):
     """Inline red highlight on a TTY (like the onboarding page's red badge); plain text otherwise."""
@@ -736,6 +758,8 @@ def cmd_integration_settings(a):
 def cmd_import(a):
     if getattr(a, "chat", False):
         sys.stdout = ChatMarks(sys.stdout)
+    ROUTER.out = sys.stdout
+    sys.stdout = ROUTER
     if a.plan:
         plan = json.load(open(a.plan))
         targets = plan["targets"]
@@ -773,10 +797,15 @@ def cmd_import(a):
 
     for (org_id, slug, itype, iid), ts in groups.items():
         print(f"  -> Snyk org {slug} ({org_id}) via {itype} {iid}")
+        jobs = []
         for t in ts:
-            repo = f"{t['owner']}/{t['name']}"
-            rec = {"repo": repo, "snyk_org": slug, "integration": itype}
+            rec = {"repo": f"{t['owner']}/{t['name']}", "snyk_org": slug, "integration": itype}
             results.append(rec)
+            jobs.append((t, rec))
+
+        def process(i, t, rec, org_id=org_id, slug=slug, itype=itype, iid=iid):
+            time.sleep(i * a.delay)  # stagger the starts to stay inside Snyk rate limits
+            repo = f"{t['owner']}/{t['name']}"
             ctx = {"owner": t["owner"], "slug": slug, "itype": itype}
 
             # 1. GitHub side: give the Snyk app access to the repo when it's limited to selected repos
@@ -791,7 +820,7 @@ def cmd_import(a):
                         print(f"       → {r}")
                 else:
                     fail(rec, repo, "not imported: the Snyk GitHub App can't reach the repo", app["recommendations"])
-                    continue
+                    return
 
             # 2. Snyk side: import
             target = {"owner": t["owner"], "name": t["name"]}
@@ -808,7 +837,7 @@ def cmd_import(a):
             if not a.apply:
                 print(f"     would import {repo}@{target.get('branch') or 'default branch (unknown)'}")
                 rec["result"] = "dry-run"
-                continue
+                return
             status, headers, resp = call("POST", f"/v1/org/{org_id}/integrations/{iid}/import",
                                          {"target": target, "exclusionGlobs": a.exclude})
             job = headers.get("Location") or headers.get("location")
@@ -817,7 +846,7 @@ def cmd_import(a):
                 fail(rec, repo, f"Snyk import request failed (HTTP {status}): {str(resp)[:200]}",
                      recommend(status, json.dumps(resp), ctx))
                 time.sleep(a.delay)
-                continue
+                return
             print(f"     ✓ import started: {job}")
 
             # 3. Wait for the job and report per-project outcomes
@@ -863,7 +892,7 @@ def cmd_import(a):
                                 if outcomes and all(o[1] for o in outcomes):
                                     rec["result"] = "imported-after-fix"
                                     time.sleep(a.delay)
-                                    continue
+                                    return
                         deps_recs = [
                             f"Give the Snyk GitHub App read access to {', '.join(t['owner'] + '/' + d for d in deps)}: rerun with "
                             f"`--apply --fix-deps`, or add them at {snyk_app_installation(t['owner']).get('settings_url', 'the app installation settings')}.",
@@ -880,7 +909,24 @@ def cmd_import(a):
                         fail(rec, repo, f"import finished with errors: {hl(msgs[:300])}", recommend(0, msgs, ctx))
                 else:
                     rec["result"] = "imported"
-            time.sleep(a.delay)
+
+        # Run the repos in parallel (their Snyk jobs overlap), then print each repo's output in order.
+        bufs = [None] * len(jobs)
+
+        def run_one(i):
+            ROUTER.local.buf = []
+            try:
+                process(i, *jobs[i])
+            except Exception as e:  # keep one repo's crash from hiding the others
+                fail(jobs[i][1], jobs[i][1]["repo"], f"unexpected error: {e}", ["Rerun this repo; if it repeats, report it."])
+            finally:
+                bufs[i] = "".join(ROUTER.local.buf)
+                ROUTER.local.buf = None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(a.parallel, len(jobs)))) as ex:
+            list(ex.map(run_one, range(len(jobs))))
+        for b in bufs:
+            sys.stdout.write(b or "")
 
     # summary
     counts = collections.Counter(r.get("result", "?") for r in results)
@@ -926,6 +972,7 @@ def main():
                    help="when a go.mod import is forbidden, add the same-org module repos to the Snyk GitHub App and retry")
     p.add_argument("--no-wait", action="store_true", help="don't wait for import jobs to finish")
     p.add_argument("--wait-timeout", type=int, default=300, help="seconds to wait per import job")
+    p.add_argument("--parallel", type=int, default=4, help="repos imported at once (default 4); 1 = one at a time")
     p.add_argument("--chat", action="store_true",
                    help="prefix lines with - / + so a ```diff block shows failures red and successes green")
     p.add_argument("--apply", action="store_true",

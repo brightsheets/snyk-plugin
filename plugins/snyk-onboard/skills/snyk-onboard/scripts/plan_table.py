@@ -7,7 +7,7 @@ as one Markdown table (the standard display), then the skipped and stopped repos
 
 Read-only. Exit code 0 when at least one repo is in the plan, 1 otherwise.
 """
-import argparse, json, os, subprocess, sys
+import argparse, concurrent.futures, json, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detect_stack as ds  # noqa: E402
@@ -63,12 +63,20 @@ def main():
     repos = si.split_repos(a.repo, a.file or [])
     mapping = si.load_mapping()
     rows, skipped, stopped, data = [], [], [], []
-    for repo in repos:
+
+    def fetch(repo):
         try:
-            paths, meta = ds.list_github(repo, None)
+            return ds.list_github(repo, None), None
         except subprocess.CalledProcessError as e:
-            stopped.append((repo, "detection", (e.stderr or "").strip() or "GitHub API error"))
+            return None, (e.stderr or "").strip() or "GitHub API error"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        fetched = list(ex.map(fetch, repos))
+    for repo, (got, err) in zip(repos, fetched):
+        if err:
+            stopped.append((repo, "detection", err))
             continue
+        paths, meta = got
         d = {"source": repo, **meta, **ds.detect(paths)}
         if meta.get("truncated"):
             d["notes"].append("GitHub tree was truncated (very large repo); clone and use --path for full accuracy.")
