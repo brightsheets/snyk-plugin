@@ -4,7 +4,7 @@ A Claude Code plugin marketplace for onboarding GitHub repos to Snyk.
 
 | Command | What it does |
 |---|---|
-| `/snyk-onboard <org>/<repo> [<org>/<repo> ...]` | Imports repos into Snyk through the GitHub Cloud App integration, each into the Snyk org named like its GitHub org, and (unless `--no-ci`) opens a PR adding Snyk CI. [Details](plugins/snyk-onboard/skills/snyk-onboard/SKILL.md) |
+| `/snyk-onboard <org>/<repo> [<org>/<repo> ...]` | Imports repos into Snyk through the GitHub Cloud App integration, each into the Snyk org named like its GitHub org, and (unless `--no-pr`) opens a PR adding a `.snyk` policy. It never adds CI workflows: CI comes from the shared reusable workflows. [Details](plugins/snyk-onboard/skills/snyk-onboard/SKILL.md) |
 | `/create-repo [go\|node\|java] [count \| names]` | Creates demo repos for Snyk testing, each with a CI workflow calling [`brightsheets/reusable-workflows`](https://github.com/brightsheets/reusable-workflows). [Details](plugins/create-repo/skills/create-repo/SKILL.md) |
 
 Add `--dry-run` to either command to see the plan without changing anything. Both plan first and ask before writing.
@@ -22,12 +22,12 @@ Update later with `/plugin marketplace update keezconsign`, then `/reload-plugin
 ## Onboard repos: `/snyk-onboard`
 
 ```
-/snyk-onboard <github-org>/<repo> [<github-org>/<repo> ...] [--no-ci] [--dry-run]
+/snyk-onboard <github-org>/<repo> [<github-org>/<repo> ...] [--no-pr] [--dry-run]
 ```
 
 ```
-/snyk-onboard brightsheets/snyk-demo-node-1 --no-ci
-/snyk-onboard brightsheets/snyk-demo-node-1 test-snyk-demo/payments-api --no-ci --dry-run
+/snyk-onboard brightsheets/snyk-demo-node-1 --no-pr
+/snyk-onboard brightsheets/snyk-demo-node-1 test-snyk-demo/payments-api --no-pr --dry-run
 /snyk-onboard --file repos.txt                 # one <org>/<repo> per line, '#' comments, orgs can be mixed
 /snyk-onboard --org test-snyk-demo --dry-run   # every repo in a GitHub org (--filter <regex> to narrow)
 /snyk-onboard snyk-demo-node-1                 # a bare name means brightsheets/<name>
@@ -45,11 +45,10 @@ Override for one run with `--snyk-org <slug|id>`. Setting `SNYK_ORG` sends every
 
 | Option | Meaning |
 |---|---|
-| `--no-ci` | Import into Snyk only. Use it for repos that already run Snyk in CI (the `/create-repo` demo repos do). |
+| `--no-pr` (or `--no-ci`) | Import into Snyk only, without the `.snyk` PR. |
 | `--dry-run` | Show the plan: detected stack, Snyk products, Snyk org and integration per repo. Imports nothing. |
 | `--file <path>` / `@path` | Read repos from a file. |
 | `--org <github-org>` | Every repo in that GitHub org (archived, forks and empty repos skipped). |
-| `--severity <level>` | Failure threshold for the generated CI: `low`, `medium`, `high` (default), `critical`. |
 
 ### Setup is checked for you, one stage at a time
 
