@@ -91,6 +91,7 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 
 | Script | What it does | Writes |
 |---|---|---|
+| `scripts/snyk_pr.py --repo <repo…> --plan <plan.json> [--apply] [--chat]` | Step 5: opens a `.snyk`-only PR per repo, safely (new temp folder, fresh branch, plain push, PR checked) | branches and PRs, with `--apply` |
 | `scripts/plan_table.py --repo <repo…> [--file …] [--snyk-org …] [--json <path>]` | Steps 1–3 in one quiet run: detects each repo, resolves its Snyk org, prints the plan table, then the skipped and stopped repos | the `--json` file only |
 | `scripts/detect_stack.py --path <dir>` or `--github owner/repo` | Detects the stack and maps it to Snyk products (raw JSON; used by `plan_table.py`) | nothing |
 | `scripts/scan_org.py --org <org> --out <plan.json>` | Runs detection on every repo in an org, writes a plan | the plan file only |
@@ -251,13 +252,23 @@ With `--no-settings` or `--dry-run`, run the same command without `--apply` (rea
 
 **No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk`, pushing the branch or opening the PR. Run it for each repo that imported fully. Repos stopped by a failure get no PR.
 
-Only for repos without a `.snyk`; a repo that has one is skipped with that reason. Also skip a repo with an open PR that already adds `.snyk` (`gh pr list -R owner/repo --state open --json number,files`), naming that PR. For an org, use the Agent tool with one subagent per repo, running several in parallel. Each subagent gets these steps:
+Run **one script** for all the fully imported repos. Don't write your own shell for this step: no hand-made clone, branch, `rm`, `set -e`, shell functions or loops.
 
-1. Pick the branch: `snyk-onboarding`, unless `gh api repos/owner/repo/git/ref/heads/snyk-onboarding` finds that branch already on GitHub (left from an earlier run). Then use `snyk-onboarding-<YYYYMMDD-HHMM>`. Never reuse, force-push or delete an existing branch. `gh repo clone owner/repo <scratch dir> -- --depth 1`, then `git switch -c <branch>`.
-2. Copy `references/snyk-policy.yaml` to `.snyk`. Remove exclude globs that don't apply to this repo's stack.
-3. Read `.github/workflows/` (read only) and note whether a workflow calls `reusable-workflows/.github/workflows/`. Change nothing there either way.
-4. Show the diff (`.snyk` only) as *Showing script output* says, then without asking: commit `chore: add Snyk policy`, push the branch (a plain push; if it's rejected, stop and report it, never force), and run `gh pr create --head <branch>`. Check the PR's files with `gh pr view <n> --json files`: if anything besides `.snyk` is in it, close the PR at once and report it as failed. The PR body lists the detected stack, the Snyk products, the detection notes, and whether the repo already calls the reusable workflows.
-5. Return one line: `owner/repo | PR <url> | reusable CI: yes|no`, `owner/repo | skipped: <reason>` or `owner/repo | failed: <error>`.
+```
+python3 scripts/snyk_pr.py --repo <fully imported repos…> --plan <scratch>/plan.json --apply --chat
+```
+
+It does, per repo, the same way every run:
+1. Skips the repo if `main` already has `.snyk`, or an open PR already adds `.snyk` (not failures).
+2. Clones into a **new** temporary folder. It never deletes a folder, file or branch.
+3. Branch: `snyk-onboarding`, or `snyk-onboarding-<YYYYMMDD-HHMM>` when that name already exists on GitHub. Never reuses one.
+4. Writes `.snyk` from `references/snyk-policy.yaml`, keeping only the excludes that fit the repo's stack (from `plan.json`).
+5. Commits `chore: add Snyk policy` (as the signed-in GitHub account), plain push (never `--force`; a rejected push is a failure), opens the PR with the stack, products, notes and whether the repo calls the reusable workflows.
+6. Checks the PR holds only `.snyk`; if not, closes it and reports a failure.
+
+It prints the branch and `.snyk` for each repo, then one line per repo: `✓ owner/repo | PR <url> | reusable CI: yes|no`, `– owner/repo | skipped: <reason>` or `✗ owner/repo | failed: <error>`, and a summary. Show it as *Showing script output* says. A ✗ line stops only that repo.
+
+Without `--apply` it only shows what it would do (use that with `--dry-run`).
 
 The reusable workflows read the `SNYK_TOKEN` secret. If `gh secret list --org <org>` doesn't show it, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. For a personal account (like `brightsheets`), secrets are per repo: `gh secret set SNYK_TOKEN --repo <owner/repo>`. Go callers with private modules also need `GO_MODULES_TOKEN`: a fine-grained PAT with read access to those repos' contents. Don't run these yourself.
 
@@ -275,6 +286,7 @@ Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - **Same display every run.** Script output goes in a ```` ```diff ```` block, verbatim, with `--chat` where the script takes it, before any explanation (*Showing script output*). This includes the setup checklist, the GH_APP_ADMIN_TOKEN block, the import dry run and the `--apply` run.
 - Plan first. Writes happen only after the user approves: the plan approval (step 3) covers the PR-check and fix-PR settings (`integration-settings --preset recommended --apply`) and the `.snyk` branch, push and PR; only the import `--apply` gets its own confirmation. `--dry-run` writes nothing except the local plan file.
 - A `.snyk` PR holds only `.snyk`. Never reuse, force-push or delete an existing branch; use a fresh branch name instead.
+- **Scripts, not ad-hoc shell.** Every step runs through this skill's scripts. Never write your own shell to clone, branch, push, delete or loop: no `rm -rf`, `set -e`, shell functions or `--force`. If a script can't do something, stop and say so.
 - Never print, log or commit `SNYK_TOKEN`. Workflows read it only as `${{ secrets.SNYK_TOKEN }}`.
 - Never push to a default branch, merge a PR, enable auto-merge, or change repo or org settings or secrets. Two exceptions: with `--apply` (after its own confirmation), the importer adds approved repos to the Snyk GitHub App's repository access, and step 4b (covered by the plan approval, skipped with `--no-settings`) applies the recommended preset to the Snyk org's PR-check and fix-PR settings.
 - Never print `GH_APP_ADMIN_TOKEN`.
