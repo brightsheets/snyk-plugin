@@ -124,9 +124,9 @@ def caller_text(repo, dest, pms, d, reusable):
     if "gomodules" in pms:
         xorg = si.go_cross_org_private(owner, repo.split("/", 1)[1], d.get("branch"))
         owners = sorted({x.split("/")[0] for x in xorg})
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/go-snyk.yaml@v1 (Open Source + Code).",
+        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/go-snyk.yaml@v2 (Open Source + Code).",
                  "# Needs secret SNYK_TOKEN" + (f", and GO_MODULES_TOKEN (read access to {', '.join(xorg)})." if owners else ".")]
-        lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v1", "    with:", f"      snyk-org: {owner}"]
+        lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v2", "    with:", f"      snyk-org: {owner}"]
         if owners:
             lines.append(f"      go-private-owners: {','.join(owners)}")
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
@@ -139,9 +139,9 @@ def caller_text(repo, dest, pms, d, reusable):
             node = (json.load(open(os.path.join(dest, "package.json"))).get("engines") or {}).get("node")
         except (OSError, ValueError):
             pass
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/js-snyk.yaml@v1 (Open Source + Code).",
+        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/js-snyk.yaml@v2 (Open Source + Code).",
                  "# Needs secret SNYK_TOKEN."]
-        lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v1", "    with:", f"      snyk-org: {owner}"]
+        lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v2", "    with:", f"      snyk-org: {owner}"]
         if node:
             lines.append(f'      node-version: "{node}"')
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
