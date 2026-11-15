@@ -91,7 +91,8 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 
 | Script | What it does | Writes |
 |---|---|---|
-| `scripts/detect_stack.py --path <dir>` or `--github owner/repo` | Detects the stack and maps it to Snyk products | nothing |
+| `scripts/plan_table.py --repo <repo…> [--file …] [--snyk-org …] [--json <path>]` | Steps 1–3 in one quiet run: detects each repo, resolves its Snyk org, prints the plan table, then the skipped and stopped repos | the `--json` file only |
+| `scripts/detect_stack.py --path <dir>` or `--github owner/repo` | Detects the stack and maps it to Snyk products (raw JSON; used by `plan_table.py`) | nothing |
 | `scripts/scan_org.py --org <org> --out <plan.json>` | Runs detection on every repo in an org, writes a plan | the plan file only |
 | `scripts/snyk_import.py orgs` | Lists the Snyk orgs the token can see | nothing |
 | `scripts/snyk_import.py integrations --org-id <id>` | Shows the Snyk org's SCM integrations (live) | nothing |
@@ -117,6 +118,8 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
 - Put each script's output in your reply **verbatim** inside a ```` ```diff ```` code block, right after running it: every line as printed, in order, nothing reworded, summarised, reordered or dropped (long IDs and URLs included).
+- **One exception, the plan:** paste `plan_table.py`'s output as-is, *not* in a code block, so it renders as the standard plan table. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
+- Show only what the steps here run. No extra checks, listings or JSON dumps.
 - Pass `--chat` to the scripts that take it (`preflight.py`, `snyk_import.py import`). It prefixes each line so the block shows failures (✗, ❌, `NEXT=` not ready, a failed summary) in red (`-`) and successes (✓, ✅, `NEXT=ready`) in green (`+`).
 - Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
 - Ask questions (AskUserQuestion) only after the block they depend on.
@@ -172,11 +175,11 @@ If running `install_tools.sh` is refused, give the user the same command with `!
 
 With `--dry-run`, still run the setup check and report where it stops, but don't install anything or wait.
 
-### 1. Detect
-- **One or more repos, or `--file`:** first get the full list with `python3 scripts/snyk_import.py repos --repo <repos…> --file <path>` (it expands bare names to `brightsheets/<name>` and drops duplicates). Then run `python3 scripts/detect_stack.py --github owner/repo` (or `--path`) for each repo.
-- **Org:** `python3 scripts/scan_org.py --org <org> [--filter …] --out snyk-onboarding-plan-<org>.json`.
+### 1. Detect (quiet)
+- **One or more repos, or `--file`:** run `python3 scripts/plan_table.py --repo <repos…> [--file <path>] [--snyk-org <slug>] --json <scratch>/plan.json`. It expands bare names to `brightsheets/<name>`, drops duplicates, detects each repo through the GitHub API and resolves its Snyk org (steps 1–3.1 at once). It prints nothing else; the full detection data goes to the `--json` file for later steps.
+- **Org:** `python3 scripts/scan_org.py --org <org> [--filter …] --out snyk-onboarding-plan-<org>.json`, then build the same table from it.
 
-Skip any repo where `already_onboarded.snyk_in_github_actions` is true unless the user asks to include it. Also skip repos with an empty `snyk_products`, and record them as "no supported stack".
+It skips archived repos, repos where Snyk already runs in GitHub Actions, and repos with no supported stack, and lists them under *Skipped*. A repo whose detection or Snyk-org lookup fails is listed under *Stopped* (*Stop on failure: per repo*); the others go on.
 
 ### 2. Choose products
 
@@ -196,12 +199,12 @@ Pass every entry in detection's `notes` on to the user. For example:
 - Unity projects should exclude `Library/` and `Temp/`, and their UPM manifests aren't SCA-scanned.
 
 ### 3. Plan and get approval
-1. Run `python3 scripts/snyk_import.py resolve --repo owner/name [--org-id …]` for each repo, or for one repo per GitHub owner in an org rollout.
-   - **Resolved:** put the Snyk org and integration in the plan.
+1. `plan_table.py` already resolved each repo's Snyk org (run `snyk_import.py resolve` by hand only to investigate a *Stopped* line).
+   - **Resolved:** it's in the table.
    - **No Snyk org with the owner's name:** show `snyk_import.py orgs` and tell the user to create a Snyk org named like the GitHub org (or pass `--snyk-org`). Don't import into a different org on your own. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
    - **No GitHub integration in that org:** stop and say a Snyk admin must add one.
 2. If `references/snyk-orgs.json` is more than about 90 days old (`generated`), or an ID is rejected, run `refresh-orgs` and show the diff.
-3. Show the plan as one table, one row per repo: repo, branch, products, ecosystems, CI system, Snyk org, notes. Then list the skipped repos and the reason for each. For an org, propose waves: a pilot of about 10 repos, then the rest.
+3. Show `plan_table.py`'s output as-is (the table, then *Skipped* / *Stopped*), with detection notes in its Notes column. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
 4. **`--dry-run` stops here.** Otherwise ask for approval with AskUserQuestion. Nothing has been written yet. Say in the question that approving also (a) applies the *recommended* PR-check and fix-PR settings to each Snyk org's GitHub integration, for all its repos (unless `--no-settings`), and (b) opens a `.snyk`-only PR on each repo without one (unless `--no-pr`), so steps 4b and 5 run without asking again.
 
 ### 4. Import into Snyk
