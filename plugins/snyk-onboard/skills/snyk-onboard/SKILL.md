@@ -120,7 +120,7 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
 - Put each script's output in your reply **verbatim** inside a ```` ```diff ```` code block, right after running it: every line as printed, in order, nothing reworded, summarised, reordered or dropped (long IDs and URLs included).
-- **Two exceptions, the plan and the final summary:** paste `plan_table.py`'s and `summary_table.py`'s output as-is, *not* in a code block, so they render as tables. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
+- **Two exceptions.** The plan: paste `plan_table.py`'s output as-is, *not* in a code block, so it renders as a table. The final summary: `summary_table.py` draws its own box; paste its output as-is inside a plain ```` ``` ```` code block (not `diff`), so the box lines up in any terminal. Don't show the raw detection or `resolve` JSON, and don't build your own table: that table and its *Skipped* / *Stopped* lines are the whole display for steps 1–3.
 - Show only what the steps here run. No extra checks, listings or JSON dumps.
 - Pass `--chat` to the scripts that take it (`preflight.py`, `snyk_import.py import`). It prefixes each line so the block shows failures (✗, ❌, `NEXT=` not ready, a failed summary) in red (`-`) and successes (✓, ✅, `NEXT=ready`) in green (`+`).
 - Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
@@ -282,7 +282,7 @@ End every run with the summary table, built from this run's logs:
 python3 scripts/summary_table.py --import-log <scratch>/snyk-import-log.json --pr-log <scratch>/pr-log.json --settings <applied|unchanged|not-run|failed|shown>
 ```
 
-`--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`. Paste its output as-is so it renders as a table: one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Result), then `Done: n · Stopped: n · Skipped: n`. That table is the last thing the run shows, followed by one line with the report's path.
+`--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`. Paste its output as-is inside a plain ```` ``` ```` code block: a drawn box with one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Result), the PR links under it, then `Done: n · Stopped: n · Skipped: n`. (`--markdown` prints a Markdown table instead, for the report file.) That table is the last thing the run shows, followed by one line with the report's path.
 
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - the repos imported, with their Snyk org
