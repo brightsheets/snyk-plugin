@@ -3,8 +3,8 @@ name: setup-mcp
 description: >-
   Check whether the Snyk MCP server is installed in Claude Code and, after asking the user, install it
   (user, local or project scope) with `claude mcp add`. Use when the user asks to install, add, set up,
-  connect or check the Snyk MCP server or Snyk tools in Claude, and as the first step of the onboard
-  skill when no mcp__snyk__* tools are available. Never installs without an explicit yes. Supports
+  connect or check the Snyk MCP server or Snyk tools in Claude. Optional for onboarding: the onboard
+  skill runs without it. Never installs without an explicit yes. Supports
   --dry-run.
 argument-hint: "[--dry-run] [--scope user|local|project]"
 allowed-tools: >-

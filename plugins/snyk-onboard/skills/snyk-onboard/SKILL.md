@@ -6,8 +6,8 @@ description: >-
   repos into a Snyk org through its GitHub integration, and open a PR per repo adding a .snyk policy
   and a GitHub Actions workflow built for that stack. Use when the user asks to onboard, add, enable,
   roll out or set up Snyk, Snyk scanning or Snyk CI on a repo, a list of repos or an org; to find which
-  repos in an org are not on Snyk yet; or to say which Snyk products a repo needs. Checks for the Snyk
-  MCP server first and asks to install it when it is missing. Plans first and writes nothing (no Snyk
+  repos in an org are not on Snyk yet; or to say which Snyk products a repo needs. Runs on the Snyk
+  and GitHub APIs; the Snyk MCP server is optional and its setup check adds it, never blocking. Plans first and writes nothing (no Snyk
   imports, branches, pushes, PRs or secrets) until the user approves. Supports --dry-run.
 argument-hint: "<repo> [repo ...] | --file <list.txt> | --org <github-org>  [--dry-run] [--snyk-org <id>] [--severity high] [--no-ci]"
 allowed-tools: >-
