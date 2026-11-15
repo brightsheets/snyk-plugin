@@ -262,7 +262,7 @@ def main():
     sys.stdout = si.ROUTER
     plan = json.load(open(a.plan)) if a.plan else []
     repos = si.split_repos(a.repo, a.file or [])
-    print(f"{"APPLY" if a.apply else "DRY RUN"}: Snyk onboarding PRs (.snyk + Snyk caller workflow) for {len(repos)} repo(s)")
+    print(f"{'APPLY' if a.apply else 'DRY RUN'}: Snyk onboarding PRs (.snyk + Snyk caller workflow) for {len(repos)} repo(s)")
     counts, lines = {"ok": 0, "skip": 0, "fail": 0}, []
 
     def work(repo):
