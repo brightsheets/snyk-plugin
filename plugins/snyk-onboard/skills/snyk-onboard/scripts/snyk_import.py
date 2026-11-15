@@ -657,6 +657,14 @@ PRESETS = {
         "autoDepUpgradeEnabled": True,
         "autoDepUpgradeLimit": 5,
     },
+    # Fix and upgrade PRs, with Snyk's PR checks off (the user said no to PR checks).
+    "fix-prs": {
+        "pullRequestTestEnabled": False,
+        "pullRequestTestCodeEnabled": False,
+        "autoRemediationPrs": {"freshPrsEnabled": True, "backlogPrsEnabled": True},
+        "autoDepUpgradeEnabled": True,
+        "autoDepUpgradeLimit": 5,
+    },
     # Only PR checks (no Snyk-authored PRs).
     "checks-only": {
         "pullRequestTestEnabled": True,
