@@ -4,7 +4,7 @@ A Claude Code plugin marketplace for onboarding GitHub repos to Snyk.
 
 | Command | What it does |
 |---|---|
-| `/snyk-onboard <org>/<repo> [<org>/<repo> ...]` | Imports repos into Snyk through the GitHub Cloud App integration, each into the Snyk org named like its GitHub org, and (unless `--no-pr`) opens a PR adding a `.snyk` policy. It never adds CI workflows: CI comes from the shared reusable workflows. [Details](plugins/snyk-onboard/skills/snyk-onboard/SKILL.md) |
+| `/snyk-onboard <org>/<repo> [<org>/<repo> ...]` | Imports repos into Snyk through the GitHub Cloud App integration, each into the Snyk org named like its GitHub org, and (unless `--no-pr`) opens a PR adding a `.snyk` policy and, if the repo has none, a Snyk-only caller workflow (`<stack>-snyk.yaml@v1` from the shared reusable workflows). [Details](plugins/snyk-onboard/skills/snyk-onboard/SKILL.md) |
 | `/create-repo [go\|node\|java] [count \| names]` | Creates demo repos for Snyk testing, each with a CI workflow calling [`brightsheets/reusable-workflows`](https://github.com/brightsheets/reusable-workflows). [Details](plugins/create-repo/skills/create-repo/SKILL.md) |
 
 Add `--dry-run` to either command to see the plan without changing anything. Both plan first and ask before writing.

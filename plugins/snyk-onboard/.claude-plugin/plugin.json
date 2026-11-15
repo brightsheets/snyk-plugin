@@ -1,7 +1,7 @@
 {
   "name": "snyk-onboard",
-  "version": "0.9.2",
-  "description": "Onboard a GitHub repo or a whole org to Snyk: detect each repo's tech stack, pick the Snyk products that fit (Open Source, Code, Container, IaC), import the repos into a Snyk org and open a PR per repo with a .snyk policy (never a CI workflow: CI comes from the shared reusable workflows); adds the optional Snyk MCP server when the Snyk CLI is present (onboarding never needs it). Plans first and writes nothing until you approve. Supports --dry-run.",
+  "version": "0.10.0",
+  "description": "Onboard a GitHub repo or a whole org to Snyk: detect each repo's tech stack, pick the Snyk products that fit (Open Source, Code, Container, IaC), import the repos into a Snyk org and open a PR per repo with a .snyk policy and, if missing, a Snyk-only caller workflow for the stack (reusable <stack>-snyk.yaml@v1); adds the optional Snyk MCP server when the Snyk CLI is present (onboarding never needs it). Plans first and writes nothing until you approve. Supports --dry-run.",
   "author": {
     "name": "Lovelyn Chinenye"
   },
