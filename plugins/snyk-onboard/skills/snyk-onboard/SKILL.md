@@ -121,21 +121,28 @@ Show what the scripts print the same way every time, so a run always looks like 
 - Explain only after the block, in a few lines. Never restate a result in your own words before showing it, and never show a result the output didn't print.
 - Ask questions (AskUserQuestion) only after the block they depend on.
 
-## Stop on the first failure
-If anything fails, the run ends there. Don't run any later step, for that repo or any other.
+## Stop on failure: per repo
+A failure stops **only the repo it belongs to**. That repo's later steps don't run; every other repo carries on. Only a failure that isn't about one repo stops the whole run.
 
-A failure is any of these:
+**Stops the whole run** (no repo can go on):
 - the setup check ends with `NEXT=` anything but `ready`, or shows the `GH_APP_ADMIN_TOKEN` warning
-- detection, `resolve` or `repos` errors, or a repo can't be resolved to a Snyk org and integration
-- a dry run with a `SKIP` line, or an importer run that exits non-zero, prints ✗, or ends with `Summary:` holding anything but `imported=` / `dry-run=` (a partial import, where some projects failed, counts)
-- `integration-settings --apply` errors or reports a setting that didn't take effect
-- a clone, commit, push or `gh pr create` that fails, or a PR holding anything besides `.snyk`
-- any other command that exits non-zero or prints an error
+- `repos` errors, or the plan approval or import confirmation is declined
 
-Then:
+**Stops that repo only** (the others continue):
+- detection or `resolve` errors for it, or it can't be resolved to a Snyk org and integration
+- a `SKIP` line for it in the dry run
+- its import prints ✗ (failed, or only partly imported, where some projects failed)
+- its clone, commit, push or `gh pr create` fails, or its PR holds anything besides `.snyk`
+- any other command about that repo that exits non-zero or prints an error
+
+**Stops the settings for that Snyk org only:** `integration-settings --apply` errors or reports a setting that didn't take effect. Its repos still get their `.snyk` PRs.
+
+When something fails:
 1. Show the failing command's output verbatim in a ```` ```diff ```` block (*Showing script output*). Nothing reworded or dropped.
-2. Under it, one short list: what ran and passed, the step that failed, and the steps not run.
-3. Stop. Don't retry, don't ask what to do next, don't write the report, don't open PRs or change settings. The next `/snyk-onboard` run starts fresh from step 0.
+2. Under it, one line per stopped repo: the step that failed and the steps it won't get. Then carry on with the other repos.
+3. For a stopped repo: don't retry it, don't change anything more for it, don't open its PR. The next `/snyk-onboard` run starts fresh from step 0.
+
+At the end, the report covers every repo: done, skipped, and stopped (with the step that failed). If the whole run stopped, there's no report: show the failing output and the list, then stop.
 
 These are not failures: a repo skipped by detection rules (already onboarded, no supported stack), a repo that already has `.snyk`, an open PR that already adds `.snyk`, and settings that print "Nothing to change".
 
@@ -221,10 +228,10 @@ Show the importer's output as *Showing script output* says, for the dry run and 
 Steps:
 1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
 2. Tell the user in the plan that `--apply` will both add repos to the Snyk GitHub App installation and import them. Run with `--apply --chat` only after they confirm that wave. Pass `--no-grant-app` if they want imports only. If a Go import fails on private modules, ask before rerunning with `--fix-deps`: it grants the app access to more repos than the ones in the plan.
-3. Show the output, summary and recommendations included. If any repo failed or was only partly imported, **stop here** (*Stop on the first failure*). Keep `snyk-import-log.json`.
+3. Show the output, summary and recommendations included. A repo that failed or was only partly imported stops here; the repos that imported fully go on to 4b and 5 (*Stop on failure: per repo*). Keep `snyk-import-log.json`.
 
-### 4b. PR checks and fix PRs (only after every import succeeded)
-The GitHub integration's settings decide whether Snyk checks every PR and opens fix and upgrade PRs on its own. They are per Snyk org (they apply to every repo imported through that integration), so apply them once per Snyk org in the run.
+### 4b. PR checks and fix PRs (per Snyk org with at least one repo fully imported)
+The GitHub integration's settings decide whether Snyk checks every PR and opens fix and upgrade PRs on its own. They are per Snyk org (they apply to every repo imported through that integration), so apply them once per Snyk org in the run that has at least one fully imported repo.
 
 **No extra approval.** The plan approval in step 3 covers this step: don't ask.
 
@@ -239,7 +246,7 @@ With `--no-settings` or `--dry-run`, run the same command without `--apply` (rea
 ### 5. `.snyk` policy PR (unless `--no-pr`)
 **This plugin never adds, edits or removes CI workflows.** CI scanning comes from each repo's own caller of the shared reusable workflows (`<owner>/reusable-workflows`: `go-ci.yaml@v1`, `js-ci.yaml@v1`), which set the Snyk steps for every repo. A workflow written here would duplicate or override them.
 
-**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk`, pushing the branch or opening the PR. Run it only when steps 4 and 4b succeeded.
+**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk`, pushing the branch or opening the PR. Run it for each repo that imported fully. Repos stopped by a failure get no PR.
 
 Only for repos without a `.snyk`; a repo that has one is skipped with that reason. Also skip a repo with an open PR that already adds `.snyk` (`gh pr list -R owner/repo --state open --json number,files`), naming that PR. For an org, use the Agent tool with one subagent per repo, running several in parallel. Each subagent gets these steps:
 
@@ -251,17 +258,17 @@ Only for repos without a `.snyk`; a repo that has one is skipped with that reaso
 
 The reusable workflows read the `SNYK_TOKEN` secret. If `gh secret list --org <org>` doesn't show it, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. For a personal account (like `brightsheets`), secrets are per repo: `gh secret set SNYK_TOKEN --repo <owner/repo>`. Go callers with private modules also need `GO_MODULES_TOKEN`: a fine-grained PAT with read access to those repos' contents. Don't run these yourself.
 
-### 6. Report (only when nothing failed)
+### 6. Report (unless the whole run stopped)
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
 - the repos imported, with their Snyk org
 - PR links, and whether each repo already calls the reusable workflows
-- skipped repos, with reasons (a run with a failure stops before this step)
+- skipped repos and stopped repos, with reasons: for a stopped repo, the step that failed and its error
 - follow-ups: switch on Snyk Code in the org, add build tools, tune excludes, and for repos with no reusable-workflow caller, the caller the team should add (`go-ci.yaml@v1` for Go, `js-ci.yaml@v1` for JavaScript); the plugin doesn't add it
 
 ## Rules
 - **No hallucination.** Every statement about GitHub, Snyk, tokens, projects or settings must come from a command run in this invocation; show its output as printed (*Showing script output*), never memory or an earlier run. If a command wasn't run or failed, say exactly that. Never claim a step happened (imported, added to the app, settings changed, PR opened) unless this run's output shows it.
 - **Follow the steps as written.** Run them in order, and don't add, skip or reorder steps.
-- **Stop on the first failure.** Any failure ends the run at once: show its output verbatim, list what ran and what didn't, and stop. No later step runs, no retry, no report (*Stop on the first failure*).
+- **Stop on failure, per repo.** A failure stops only its repo: show the output verbatim, say what that repo won't get, and carry on with the others. Only a setup failure or a declined approval stops the whole run (*Stop on failure: per repo*). No retry of a stopped repo.
 - **Same display every run.** Script output goes in a ```` ```diff ```` block, verbatim, with `--chat` where the script takes it, before any explanation (*Showing script output*). This includes the setup checklist, the GH_APP_ADMIN_TOKEN block, the import dry run and the `--apply` run.
 - Plan first. Writes happen only after the user approves: the plan approval (step 3) covers the PR-check and fix-PR settings (`integration-settings --preset recommended --apply`) and the `.snyk` branch, push and PR; only the import `--apply` gets its own confirmation. `--dry-run` writes nothing except the local plan file.
 - A `.snyk` PR holds only `.snyk`. Never reuse, force-push or delete an existing branch; use a fresh branch name instead.
