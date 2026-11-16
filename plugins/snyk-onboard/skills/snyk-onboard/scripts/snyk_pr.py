@@ -120,13 +120,26 @@ def autofix_job(reusable, owner, with_lines, secret_lines):
                             "      app-token: ${{ secrets.AUTOFIX_APP_TOKEN }}"] + secret_lines)
 
 
+def backlog_job(reusable, owner, with_lines, secret_lines):
+    """Weekly (or Run workflow on the default branch): one fix PR for what's already on the default branch."""
+    return (["", "  autofix-backlog:",
+             "    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)",
+             "    permissions:", "      contents: write", "      pull-requests: write",
+             f"    uses: {reusable}/.github/workflows/snyk-autofix.yaml@v8", "    with:", "      mode: backlog",
+             f"      snyk-org: {owner}"]
+            + with_lines + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}",
+                            "      app-token: ${{ secrets.AUTOFIX_APP_TOKEN }}"] + secret_lines)
+
+
 def caller_text(repo, dest, pms, d, reusable):
     """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v4.
     No build, tests or Docker: just Snyk Open Source + Code, the PR comment and the merge gate."""
     owner = repo.split("/", 1)[0]
     head = ["name: Snyk", "on:", "  push:", '    branches: [main, "hotfix/**"]', "  pull_request:",
-            "  workflow_dispatch:", "permissions:", "  contents: read", "  actions: read",
-            "  security-events: write", "  pull-requests: write", "jobs:", "  snyk:"]
+            "  workflow_dispatch:", "  schedule:", '    - cron: "0 6 * * 1"   # weekly backlog fixes (Mondays 06:00 UTC)',
+            "permissions:", "  contents: read", "  actions: read",
+            "  security-events: write", "  pull-requests: write", "jobs:", "  snyk:",
+            "    if: github.event_name != 'schedule'"]
     common = ["      # Block PRs on high/critical findings; pushes stay report-only.",
               "      fail-on-issues: ${{ github.event_name == 'pull_request' }}",
               "      # Publish reports to Snyk from the default branch only; PRs scan, comment and gate without publishing.",
@@ -136,7 +149,8 @@ def caller_text(repo, dest, pms, d, reusable):
         owners = sorted({x.split("/")[0] for x in xorg})
         lines = [f"# Snyk scan: calls {reusable}/.github/workflows/go-snyk.yaml@v4 (Open Source + Code).",
                  f"# On PRs, Snyk Autofix ({reusable}/.github/workflows/snyk-autofix.yaml@v8) then opens a fix PR",
-                 "# with Snyk's upgrades for the dependency issues the PR introduces (go get + go mod tidy).",
+                 "# with Snyk's upgrades for the dependency issues the PR introduces (go get + go mod tidy);",
+                 "# weekly, one backlog fix PR for main.",
                  "# Needs secret SNYK_TOKEN, AUTOFIX_APP_TOKEN (contents, pull requests and issues: write)"
                  + (f", and GO_MODULES_TOKEN (read access to {', '.join(xorg)})." if owners else ".")]
         lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v4", "    with:", f"      snyk-org: {owner}"]
@@ -145,9 +159,9 @@ def caller_text(repo, dest, pms, d, reusable):
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
         if owners:
             lines.append("      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}")
-        lines += autofix_job(reusable, owner,
-                             [f"      go-private-owners: {','.join(owners)}"] if owners else [],
-                             ["      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}"] if owners else [])
+        go_with = [f"      go-private-owners: {','.join(owners)}"] if owners else []
+        go_sec = ["      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}"] if owners else []
+        lines += autofix_job(reusable, owner, go_with, go_sec) + backlog_job(reusable, owner, go_with, go_sec)
         return "\n".join(lines) + "\n"
     if "npm" in pms and os.path.exists(os.path.join(dest, "package-lock.json")):
         node = None
@@ -157,14 +171,15 @@ def caller_text(repo, dest, pms, d, reusable):
             pass
         lines = [f"# Snyk scan: calls {reusable}/.github/workflows/js-snyk.yaml@v4 (Open Source + Code).",
                  f"# On PRs, Snyk Autofix ({reusable}/.github/workflows/snyk-autofix.yaml@v8) then opens a fix PR",
-                 "# with Snyk's upgrades for the dependency issues the PR introduces.",
+                 "# with Snyk's upgrades for the dependency issues the PR introduces; weekly, one backlog fix PR for main.",
                  "# Needs secret SNYK_TOKEN, and AUTOFIX_APP_TOKEN (contents, pull requests and issues: write)."]
         lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v4", "    with:", f"      snyk-org: {owner}"]
         if node:
             lines.append(f'      node-version: "{node}"')
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
         # Runs even when the scan's gate failed: that's exactly when there's something to fix.
-        lines += autofix_job(reusable, owner, [f'      node-version: "{node}"'] if node else [], [])
+        node_with = [f'      node-version: "{node}"'] if node else []
+        lines += autofix_job(reusable, owner, node_with, []) + backlog_job(reusable, owner, node_with, [])
         return "\n".join(lines) + "\n"
     return None  # no Snyk reusable workflow for this stack
 

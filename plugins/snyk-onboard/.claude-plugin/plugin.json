@@ -1,6 +1,6 @@
 {
   "name": "snyk-onboard",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "Onboard a GitHub repo or a whole org to Snyk (SCM import by default; CI-only for repos with private dependencies in another org, or with --ci-only): detect each repo's tech stack, pick the Snyk products that fit (Open Source, Code, Container, IaC), import the repos into a Snyk org and open a PR per repo with a .snyk policy and, if missing, a Snyk caller workflow for the stack (reusable <stack>-snyk.yaml@v4; with Snyk Autofix for JavaScript and Go, which opens a fix PR with Snyk's upgrades for the dependency issues a PR introduces and links it on the PR), and a merge-gate ruleset that blocks PRs adding high/critical Snyk alerts; adds the optional Snyk MCP server when the Snyk CLI is present (onboarding never needs it). Plans first and writes nothing until you approve. Supports --dry-run.",
   "author": {
     "name": "Lovelyn Chinenye"
