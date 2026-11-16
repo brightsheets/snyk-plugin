@@ -122,7 +122,8 @@ def main():
         adds = []
         if sp.gh_json("api", f"repos/{repo}/contents/.snyk") is None:
             adds.append(".snyk")
-        if not has_ci and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
+        # The Snyk caller only for CI-only repos: with an SCM import it would double-report.
+        if d["mode"] == "ci-only" and not has_ci and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
             if stack and sp.reusable_repo(owner, a.reusable):
                 adds.append(f"snyk.yml ({stack}-snyk + autofix)")
         d["pr_adds"] = adds

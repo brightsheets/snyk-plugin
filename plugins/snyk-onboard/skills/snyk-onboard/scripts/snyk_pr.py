@@ -188,11 +188,15 @@ def one(repo, plan, apply, reusable_override=None):
     """Returns (status, line) with status in ok | skip | fail."""
     need_snyk = gh_json("api", f"repos/{repo}/contents/.snyk") is None
     ci = reusable_ci(repo)
-    need_caller = not ci
-    if need_caller and gh_json("api", f"repos/{repo}/contents/{CALLER}") is not None:
+    # SCM import (the default): the integration reports and checks PRs, so no CLI caller (no double reporting).
+    scm = stack_of(repo, plan)[2].get("mode", "scm") == "scm"
+    need_caller = not ci and not scm
+    if scm and not ci:
+        caller_note = "SCM import: no Snyk caller (the SCM integration reports and checks PRs)"
+    elif need_caller and gh_json("api", f"repos/{repo}/contents/{CALLER}") is not None:
         need_caller = False  # a snyk.yml exists but doesn't call the reusable workflows: never overwrite it
         caller_note = f"{CALLER} exists and doesn't call the reusable workflows; left as is"
-    else:
+    elif not scm or ci:
         caller_note = None
     if not need_snyk and not need_caller:
         return "skip", f"– {repo} | skipped: has .snyk and " + (caller_note or "already calls the reusable workflows")

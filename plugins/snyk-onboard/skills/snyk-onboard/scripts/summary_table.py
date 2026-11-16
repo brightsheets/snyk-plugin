@@ -56,6 +56,7 @@ def main():
                 if d.get("mode") == "ci-only" and d["source"].lower() not in seen]
     prs = {r["repo"].lower(): r for r in (json.load(open(a.pr_log)) if a.pr_log else [])}
     gates = {r["repo"].lower(): r for r in (json.load(open(a.ruleset_log)) if a.ruleset_log else [])}
+    mode = {d["source"].lower(): d.get("mode", "scm") for d in (json.load(open(a.plan)) if a.plan else [])}
     settings_txt = {"applied": "✓ recommended applied", "unchanged": "✓ already recommended",
                     "not-run": "—", "failed": "✗ failed", "shown": "shown only"}[a.settings]
 
@@ -95,7 +96,7 @@ def main():
         if not ok or (pr and pr["status"] == "fail"):
             gate_txt = "—"
         elif not g:
-            gate_txt = "not run"
+            gate_txt = "Snyk PR checks" if mode.get(repo.lower(), "scm") == "scm" else "not run"
         elif g["status"] == "ok":
             gate_txt = "✓ added" if g.get("applied") else "would add"
         elif g["status"] == "skip":

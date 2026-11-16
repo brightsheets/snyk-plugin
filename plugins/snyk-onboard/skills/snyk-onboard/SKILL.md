@@ -127,7 +127,7 @@ The scripts import through a Snyk org's **existing** GitHub integration. They ne
 
 | Mode | When | Steps it gets |
 |---|---|---|
-| **SCM import** (default) | every repo, unless below | 4 import, 4b fix-PR settings, 5 PR, 5b merge gate |
+| **SCM import** (default) | every repo, unless below | 4 import, 4b integration settings (fix PRs, and **Snyk PR checks as the merge gate**), 5 PR with `.snyk` only. **No** Snyk caller and **no** ruleset: the integration already reports `main` and checks PRs, and a CLI caller would double-report |
 | **CI only** | `go.mod` requires a **private module from another GitHub org** (the Snyk SCM integration on this org can't read it, so the import would fail with "Unable to fetch private dependencies"), or `--ci-only` | **no** step 4 or 4b; 5 PR (`.snyk` + the Snyk caller with `go-private-owners` / `GO_MODULES_TOKEN`, scan + autofix) and 5b merge gate |
 
 A CI-only repo needs a Snyk org named like its GitHub owner (the CLI publishes there on `main`) but no SCM integration, and it needs a Snyk caller: an existing workflow calling the reusable workflows, or one step 5 can add (npm or Go). Otherwise it's *Stopped* at the plan. Its Snyk projects appear after the first CI run on the default branch (`snyk monitor`), not at onboarding. Fix PRs from Snyk's integration don't apply to it: the autofix job covers new dependency issues on PRs.
@@ -259,7 +259,7 @@ Steps:
 ### 4b. Fix PRs, and PR checks if wanted (per Snyk org with at least one repo fully imported)
 The GitHub integration's settings decide whether Snyk opens fix and upgrade PRs on its own, and whether it checks every PR. They are per Snyk org (they apply to every repo imported through that integration), so handle them once per Snyk org in the run that has at least one fully imported repo.
 
-**PR checks are optional: ask yes or no.** Fix and upgrade PRs need no question (the plan approval covers them).
+**PR checks are optional: ask yes or no.** Fix and upgrade PRs need no question (the plan approval covers them). In SCM mode the PR checks **are** the merge gate (no ruleset is added), so recommend *Yes*.
 
 1. Ask with AskUserQuestion, once per Snyk org: "Turn on Snyk PR checks for `<org>`?" with two options:
    - *Yes*: Snyk tests every PR for new dependency and code issues and fails the check on high/critical. It adds its own status checks and comments on every PR, for all repos in that org.
@@ -280,7 +280,7 @@ With `--no-settings` or `--dry-run`, don't ask: run `--preset recommended` witho
 
 **Never edit or delete an existing workflow.** A repo that already calls the reusable workflows keeps its own; a `snyk.yml` that doesn't call them is left as is and reported.
 
-**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk` or the caller workflow, pushing the branch or opening the PR. Run it for each repo that imported fully, **plus every CI-only repo** from the plan. Repos stopped by a failure get no PR.
+**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk` or the caller workflow, pushing the branch or opening the PR. Run it for each repo that imported fully, **plus every CI-only repo** from the plan. Repos stopped by a failure get no PR. For SCM repos (`mode: scm` in `plan.json`) the script adds **only `.snyk`**: no Snyk caller, so nothing reports twice.
 
 Run **one script** for all the fully imported repos. Don't write your own shell for this step: no hand-made clone, branch, `rm`, `set -e`, shell functions or loops.
 
@@ -302,8 +302,8 @@ Without `--apply` it only shows what it would do (use that with `--dry-run`).
 
 The reusable workflows read the `SNYK_TOKEN` secret. The autofix job also reads `AUTOFIX_APP_TOKEN`: a PAT (classic `repo`, or fine-grained with Contents, Pull requests and Issues: read and write) so it can open the fix PR and CI runs on it. Without it the autofix falls back to `GITHUB_TOKEN`, which can't open PRs unless the repo allows Actions to create PRs. Give the command, don't run it: `gh secret set AUTOFIX_APP_TOKEN --org <org> --visibility all` (or `--repo <owner/repo>`). If `gh secret list --org <org>` doesn't show it, give the user the command to set it: `gh secret set SNYK_TOKEN --org <org> --visibility all`. For a personal account (like `brightsheets`), secrets are per repo: `gh secret set SNYK_TOKEN --repo <owner/repo>`. Go callers with private modules also need `GO_MODULES_TOKEN`: a fine-grained PAT with read access to those repos' contents. Don't run these yourself.
 
-### 5b. Merge gate (unless `--no-gate`)
-Without a rule, the Snyk check goes red but the PR can still be merged. This step adds a **repository ruleset** to each repo that imported fully:
+### 5b. Merge gate (CI-only repos, unless `--no-gate`)
+Only for **CI-only repos**: their Snyk results go to code scanning, so a ruleset is what makes them block. SCM repos are gated by Snyk's own PR checks (step 4b) and get **no** ruleset. This step adds a **repository ruleset** to each CI-only repo:
 
 | Setting | Value |
 |---|---|
@@ -322,7 +322,7 @@ It's added only where it can work, and never changes an existing rule:
 **No extra approval.** The plan approval in step 3 covers it. Run one script for the fully imported repos, after step 5:
 
 ```
-python3 scripts/snyk_ruleset.py --repo <fully imported repos… + CI-only repos…> --pr-log <scratch>/pr-log.json --apply --chat --log <scratch>/ruleset-log.json
+python3 scripts/snyk_ruleset.py --repo <CI-only repos…> --pr-log <scratch>/pr-log.json --apply --chat --log <scratch>/ruleset-log.json
 ```
 
 It prints, per repo, the default branch and what uploads Snyk results, the ruleset it adds, then one line per repo: `✓ owner/repo | merge gate <url> | …`, `– owner/repo | skipped: <reason>` or `✗ owner/repo | failed: <error>`, and a summary. Show it as *Showing script output* says. A ✗ stops only that repo. Without `--apply` it only shows what it would do (with `--dry-run`).
