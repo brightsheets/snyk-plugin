@@ -1,0 +1,8 @@
+{
+  "name": "fix-pipeline",
+  "version": "0.1.0",
+  "description": "Read a failed GitHub Actions run (run URL, job URL, or owner/repo for the latest failure), find the root cause in its logs, and open a fix PR. Snyk gate failures are fixed deterministically from Snyk's own recommendation (base image, dependency upgrade); build/test failures from the error; credential and infrastructure failures get guidance, no PR. Plans first and changes nothing until you approve. Supports --dry-run.",
+  "author": { "name": "Lovelyn Chinenye" },
+  "repository": "https://github.com/brightsheets/snyk-plugin",
+  "keywords": ["github-actions", "ci", "pipeline", "snyk", "fix", "devops"]
+}

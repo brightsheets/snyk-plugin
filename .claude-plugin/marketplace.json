@@ -21,6 +21,15 @@
         "name": "Lovelyn Chinenye"
       },
       "category": "development"
+    },
+    {
+      "name": "fix-pipeline",
+      "description": "Read a failed GitHub Actions run (run URL, job URL, or owner/repo), find the root cause in its logs, and open a fix PR. Snyk gate failures are fixed from Snyk's own recommendation; build/test failures from the error; credential and infrastructure failures get guidance, no PR. Plans first and changes nothing until you approve.",
+      "source": "./plugins/fix-pipeline",
+      "author": {
+        "name": "Lovelyn Chinenye"
+      },
+      "category": "development"
     }
   ]
 }
