@@ -96,7 +96,7 @@ def main():
         if not ok or (pr and pr["status"] == "fail"):
             gate_txt = "—"
         elif not g:
-            gate_txt = "Snyk PR checks" if mode.get(repo.lower(), "scm") == "scm" else "not run"
+            gate_txt = "not run"
         elif g["status"] == "ok":
             gate_txt = "✓ added" if g.get("applied") else "would add"
         elif g["status"] == "skip":
