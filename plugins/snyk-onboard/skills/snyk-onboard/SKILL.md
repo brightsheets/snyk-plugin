@@ -85,7 +85,7 @@ If no arguments were given, reply with that usage line and the arguments table b
 | `--filter <regex>` | With `--org`, only repos whose `owner/name` matches. |
 | `--no-pr` (or `--no-ci`) | Import into Snyk only. Do not open the `.snyk` PR. |
 | `--no-gate` | Don't add the merge gate (step 5b): no repository ruleset. |
-| `--ci-only` | Onboard every repo **without the SCM import**: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Without it, only repos whose `go.mod` needs private modules from another GitHub org go CI-only (see *Onboarding mode*). |
+| `--ci-only` | Onboard every repo **without the SCM import**: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Without it, every repo is SCM import: CI-only is never picked automatically (see *Onboarding mode*). |
 | `--no-settings` | Don't change the Snyk org's PR-check and fix-PR settings, and don't ask about PR checks (step 4b shows them only). |
 | `--dry-run` | Do steps 0–3 and print the plan, then stop. No Snyk import, branch, push or PR. |
 
@@ -122,17 +122,19 @@ The importer reads it, so nobody has to look up IDs. Credentials come from `SNYK
 
 The scripts import through a Snyk org's **existing** GitHub integration. They never create or change an integration: that's a Snyk admin task in Snyk > Settings > Integrations, plus installing the Snyk GitHub App on the GitHub org.
 
-## Onboarding mode: SCM import by default, CI only for cross-org dependencies
+## Onboarding mode: SCM import unless `--ci-only`
 `plan_table.py` picks one mode per repo and shows it in the **Onboarding** column:
 
 | Mode | When | Steps it gets |
 |---|---|---|
-| **SCM import** (default) | every repo, unless below | 4 import, 4b integration settings (fix PRs, Snyk PR checks), 5 PR with `.snyk` only, 5b a ruleset that **requires Snyk's own PR checks** (when they're on). **No** Snyk caller: the integration already reports `main` and checks PRs, and a CLI caller would double-report |
-| **CI only** | `go.mod` requires a **private module from another GitHub org** (the Snyk SCM integration on this org can't read it, so the import would fail with "Unable to fetch private dependencies"), or `--ci-only` | **no** step 4 or 4b; 5 PR (`.snyk` + the Snyk caller with `go-private-owners` / `GO_MODULES_TOKEN`, scan + autofix) and 5b merge gate |
+| **SCM import** (default) | every repo without `--ci-only`, including Go repos whose `go.mod` needs private modules from another GitHub org (they get a note in **Notes**: the Open Source import may fail with "Unable to fetch private dependencies"; the user decides, by rerunning with `--ci-only`) | 4 import, 4b integration settings (fix PRs, Snyk PR checks), 5 PR with `.snyk` only, 5b a ruleset that **requires Snyk's own PR checks** (when they're on). **No** Snyk caller: the integration already reports `main` and checks PRs, and a CLI caller would double-report |
+| **CI only** | only with `--ci-only`. Never chosen for the user, not even for cross-org private Go modules | **no** step 4 or 4b; 5 PR (`.snyk` + the Snyk caller with `go-private-owners` / `GO_MODULES_TOKEN`, scan + autofix) and 5b merge gate |
 
 A CI-only repo needs a Snyk org named like its GitHub owner (the CLI publishes there on `main`) but no SCM integration, and it needs a Snyk caller: an existing workflow calling the reusable workflows, or one step 5 can add (npm or Go). Otherwise it's *Stopped* at the plan. Its Snyk projects appear after the first CI run on the default branch (`snyk monitor`), not at onboarding. Fix PRs from Snyk's integration don't apply to it: the autofix job covers new dependency issues on PRs.
 
 `plan.json` records each repo's `mode` (`scm` or `ci-only`) and `mode_reason`; the next steps read it.
+
+**Don't choose the mode for the user.** Use the mode `plan_table.py` printed, which follows `--ci-only` alone. Never suggest, recommend or switch a repo to CI only on your own; if a note warns about cross-org private modules, pass the note on and leave the choice to the user.
 
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
@@ -223,7 +225,7 @@ Pass every entry in detection's `notes` on to the user. For example:
    - **No Snyk org with the owner's name:** show `snyk_import.py orgs` and tell the user to create a Snyk org named like the GitHub org (or pass `--snyk-org`). Don't import into a different org on your own. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
    - **No GitHub integration in that org:** stop and say a Snyk admin must add one.
 2. If `references/snyk-orgs.json` is more than about 90 days old (`generated`), or an ID is rejected, run `refresh-orgs` and show the diff.
-3. Show `plan_table.py`'s output as-is in a plain code block: the drawn box (Repo, Branch, Products, Ecosystems, CI, Snyk org, **Onboarding**, **PR adds**, Notes), then the *CI only* line (each CI-only repo and why), *Skipped* / *Stopped*. **PR adds** says what step 5 will add to each repo: `.snyk`, `snyk.yml (js-snyk + autofix)` / `snyk.yml (go-snyk + autofix)`, both, or nothing. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
+3. Show `plan_table.py`'s output as-is in a plain code block: the drawn box (Repo, Branch, Products, Ecosystems, CI, Snyk org, **Onboarding**, **PR adds**, Notes), then the *CI only* line (only with `--ci-only`), *Skipped* / *Stopped*. **PR adds** says what step 5 will add to each repo: `.snyk`, `snyk.yml (js-snyk + autofix)` / `snyk.yml (go-snyk + autofix)`, both, or nothing. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
 4. **`--dry-run` stops here.** Otherwise ask for approval with AskUserQuestion. Nothing has been written yet. Say in the question which repos are **CI only** (not imported into Snyk; caller + merge gate only) and that approving also (a) turns on Snyk's fix and upgrade PRs on each Snyk org's GitHub integration, for all its repos (unless `--no-settings`), (b) opens one PR per repo adding `.snyk` and, where no workflow calls the reusable workflows, a Snyk-only caller workflow `.github/workflows/snyk.yml` (unless `--no-pr`), and (c) adds the merge gate ruleset to each repo that uploads Snyk results to code scanning (unless `--no-gate`). PR checks are optional and get their own yes/no question in step 4b.
 
 ### 4. Import into Snyk
@@ -344,7 +346,7 @@ python3 scripts/summary_table.py --import-log <scratch>/snyk-import-log.json --p
 `--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`, and `--ruleset-log` with `--no-gate`. `--plan` adds the CI-only repos (Import `— CI only`, Projects `from CI on main`); with only CI-only repos there's no import log, so leave out `--import-log`. Paste its output as-is inside a plain ```` ``` ```` code block: a drawn box with one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Merge gate, Result), the PR links under it, then `Done: n · Stopped: n · Skipped: n`. (`--markdown` prints a Markdown table instead, for the report file.) That table is the last thing the run shows, followed by one line with the report's path.
 
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
-- the repos imported, with their Snyk org, and the CI-only repos with the reason (e.g. the cross-org private modules) and the secrets their caller needs (`GO_MODULES_TOKEN`)
+- the repos imported, with their Snyk org, and the CI-only repos (`--ci-only`) and the secrets their caller needs (`GO_MODULES_TOKEN`)
 - PR links, and whether each repo already calls the reusable workflows
 - the merge gate per repo: added (ruleset link), already gated, or skipped with the reason
 - skipped repos and stopped repos, with reasons: for a stopped repo, the step that failed and its error

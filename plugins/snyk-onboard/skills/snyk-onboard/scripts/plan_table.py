@@ -4,9 +4,9 @@ mode, and print the plan as one table (the standard display), then the skipped a
 
 Onboarding mode per repo:
   scm      (default) import through the Snyk org's SCM integration, then the PR and the merge gate
-  ci-only  no SCM import: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Picked
-           automatically when go.mod needs private modules from another GitHub org (the SCM integration
-           can't read them), or for every repo with --ci-only.
+  ci-only  no SCM import: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Only
+           with --ci-only; never picked automatically. A Go repo whose go.mod needs private modules from
+           another GitHub org stays scm and gets a note (the SCM import may fail on those modules).
 
   plan_table.py --repo test-snyk-demo/snyk-demo-go-1 [--repo …] [--file repos.txt] [--snyk-org <slug>]
                 [--json <path>]   # also save the full detection + resolve data for later steps
@@ -105,12 +105,16 @@ def main():
         stack = "go" if "gomodules" in pms else "js" if "npm" in pms and "package-lock.json" in (d.get("manifest_files") or []) else None
         owner, name = repo.split("/", 1)
         xorg = si.go_cross_org_private(owner, name, d.get("branch")) if stack == "go" else []
-        if a.ci_only or xorg:
+        # The mode is the user's choice: scm unless --ci-only. Cross-org private modules only add a note.
+        if a.ci_only:
             d["mode"] = "ci-only"
-            d["mode_reason"] = (f"go.mod needs private modules from another GitHub org ({', '.join(xorg)}), "
-                                "which the SCM integration can't read") if xorg else "--ci-only"
+            d["mode_reason"] = "--ci-only"
         else:
             d["mode"] = "scm"
+            if xorg:
+                d.setdefault("notes", []).append(
+                    f"go.mod needs private modules from another GitHub org ({', '.join(xorg)}); the SCM integration "
+                    "may not read them, so the Open Source import can fail (--ci-only scans them in CI instead)")
         if d["mode"] == "scm" and not iid:
             stopped.append((repo, "resolve", why)); continue
         if d["mode"] == "ci-only" and not org:
@@ -127,7 +131,7 @@ def main():
             if stack and sp.reusable_repo(owner, a.reusable):
                 adds.append(f"snyk.yml ({stack}-snyk + autofix)")
         d["pr_adds"] = adds
-        mode = "SCM import" if d["mode"] == "scm" else "CI only (cross-org deps)" if xorg else "CI only"
+        mode = "SCM import" if d["mode"] == "scm" else "CI only"
         rows.append([repo, d["branch"], products(d), ecosystems(d),
                      ", ".join(label(c, CI) for c in d.get("ci_systems") or []) or "none",
                      f"{org['slug']} ({label(itype, ITYPE) if d['mode'] == 'scm' else 'CLI'})", mode,
