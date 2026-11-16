@@ -1,4 +1,3 @@
-# keezconsign
 
 A Claude Code plugin marketplace for onboarding GitHub repos to Snyk.
 
