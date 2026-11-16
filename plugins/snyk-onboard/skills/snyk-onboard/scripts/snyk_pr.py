@@ -110,6 +110,16 @@ def reusable_repo(owner, override=None):
     return info["full_name"] if info else None
 
 
+def autofix_job(reusable, owner, with_lines, secret_lines):
+    """The autofix job: after the scan (even when its gate failed), on PRs only, never on its own fix PRs."""
+    return (["", "  autofix:", "    needs: snyk",
+             "    if: ${{ !cancelled() && github.event_name == 'pull_request' && !startsWith(github.head_ref, 'snyk-autofix/') }}",
+             "    permissions:", "      contents: write", "      pull-requests: write",
+             f"    uses: {reusable}/.github/workflows/snyk-autofix.yaml@v8", "    with:", f"      snyk-org: {owner}"]
+            + with_lines + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}",
+                            "      app-token: ${{ secrets.AUTOFIX_APP_TOKEN }}"] + secret_lines)
+
+
 def caller_text(repo, dest, pms, d, reusable):
     """A Snyk-only caller for the repo's stack: js-snyk.yaml (JavaScript) or go-snyk.yaml (Go), at @v4.
     No build, tests or Docker: just Snyk Open Source + Code, the PR comment and the merge gate."""
@@ -124,14 +134,20 @@ def caller_text(repo, dest, pms, d, reusable):
     if "gomodules" in pms:
         xorg = si.go_cross_org_private(owner, repo.split("/", 1)[1], d.get("branch"))
         owners = sorted({x.split("/")[0] for x in xorg})
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/go-snyk.yaml@v4 (Open Source + Code).",
-                 "# Needs secret SNYK_TOKEN" + (f", and GO_MODULES_TOKEN (read access to {', '.join(xorg)})." if owners else ".")]
+        lines = [f"# Snyk scan: calls {reusable}/.github/workflows/go-snyk.yaml@v4 (Open Source + Code).",
+                 f"# On PRs, Snyk Autofix ({reusable}/.github/workflows/snyk-autofix.yaml@v8) then opens a fix PR",
+                 "# with Snyk's upgrades for the dependency issues the PR introduces (go get + go mod tidy).",
+                 "# Needs secret SNYK_TOKEN, AUTOFIX_APP_TOKEN (contents, pull requests and issues: write)"
+                 + (f", and GO_MODULES_TOKEN (read access to {', '.join(xorg)})." if owners else ".")]
         lines += head + [f"    uses: {reusable}/.github/workflows/go-snyk.yaml@v4", "    with:", f"      snyk-org: {owner}"]
         if owners:
             lines.append(f"      go-private-owners: {','.join(owners)}")
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
         if owners:
             lines.append("      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}")
+        lines += autofix_job(reusable, owner,
+                             [f"      go-private-owners: {','.join(owners)}"] if owners else [],
+                             ["      go-modules-token: ${{ secrets.GO_MODULES_TOKEN }}"] if owners else [])
         return "\n".join(lines) + "\n"
     if "npm" in pms and os.path.exists(os.path.join(dest, "package-lock.json")):
         node = None
@@ -148,13 +164,7 @@ def caller_text(repo, dest, pms, d, reusable):
             lines.append(f'      node-version: "{node}"')
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
         # Runs even when the scan's gate failed: that's exactly when there's something to fix.
-        lines += ["", "  autofix:", "    needs: snyk",
-                  "    if: ${{ !cancelled() && github.event_name == 'pull_request' && !startsWith(github.head_ref, 'snyk-autofix/') }}",
-                  "    permissions:", "      contents: write", "      pull-requests: write",
-                  f"    uses: {reusable}/.github/workflows/snyk-autofix.yaml@v8", "    with:", f"      snyk-org: {owner}"]
-        if node:
-            lines.append(f'      node-version: "{node}"')
-        lines += ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}", "      app-token: ${{ secrets.AUTOFIX_APP_TOKEN }}"]
+        lines += autofix_job(reusable, owner, [f'      node-version: "{node}"'] if node else [], [])
         return "\n".join(lines) + "\n"
     return None  # no Snyk reusable workflow for this stack
 
