@@ -41,14 +41,19 @@ def box(head, rows, width=26):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--import-log", required=True)
+    ap.add_argument("--import-log")
     ap.add_argument("--pr-log")
     ap.add_argument("--ruleset-log")
+    ap.add_argument("--plan", help="plan.json from plan_table.py: adds the CI-only repos (not in the import log)")
     ap.add_argument("--markdown", action="store_true", help="print a Markdown table instead of the drawn box")
     ap.add_argument("--settings", default="not-run",
                     choices=["applied", "unchanged", "not-run", "failed", "shown"])
     a = ap.parse_args()
-    imports = json.load(open(a.import_log))
+    imports = json.load(open(a.import_log)) if a.import_log else []
+    plan = json.load(open(a.plan)) if a.plan else []
+    seen = {r["repo"].lower() for r in imports}
+    imports += [{"repo": d["source"], "result": "ci-only"} for d in plan
+                if d.get("mode") == "ci-only" and d["source"].lower() not in seen]
     prs = {r["repo"].lower(): r for r in (json.load(open(a.pr_log)) if a.pr_log else [])}
     gates = {r["repo"].lower(): r for r in (json.load(open(a.ruleset_log)) if a.ruleset_log else [])}
     settings_txt = {"applied": "✓ recommended applied", "unchanged": "✓ already recommended",
@@ -68,9 +73,11 @@ def main():
             imp = "✗ failed"
         elif res == "skipped":
             imp = "skipped"
+        elif res == "ci-only":
+            imp = "— CI only"
         else:
             imp = res or "?"
-        ok = imp == "✓ imported"
+        ok = imp in ("✓ imported", "— CI only")
         pr = prs.get(repo.lower())
         if not ok:
             pr_txt = "—"
@@ -105,7 +112,8 @@ def main():
             result = "Stopped at merge gate"; stopped += 1
         else:
             result = "Done"; done += 1
-        rows.append([repo, imp, projects(rec), settings_txt if ok else "—", pr_txt, gate_txt, result])
+        rows.append([repo, imp, "from CI on main" if res == "ci-only" else projects(rec),
+                     "—" if res == "ci-only" else (settings_txt if ok else "—"), pr_txt, gate_txt, result])
     if a.markdown:
         print("| " + " | ".join(head) + " |")
         print("|" + "|".join("---" for _ in head) + "|")

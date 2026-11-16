@@ -85,6 +85,7 @@ If no arguments were given, reply with that usage line and the arguments table b
 | `--filter <regex>` | With `--org`, only repos whose `owner/name` matches. |
 | `--no-pr` (or `--no-ci`) | Import into Snyk only. Do not open the `.snyk` PR. |
 | `--no-gate` | Don't add the merge gate (step 5b): no repository ruleset. |
+| `--ci-only` | Onboard every repo **without the SCM import**: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Without it, only repos whose `go.mod` needs private modules from another GitHub org go CI-only (see *Onboarding mode*). |
 | `--no-settings` | Don't change the Snyk org's PR-check and fix-PR settings, and don't ask about PR checks (step 4b shows them only). |
 | `--dry-run` | Do steps 0–3 and print the plan, then stop. No Snyk import, branch, push or PR. |
 
@@ -120,6 +121,18 @@ All scripts are in this skill's `scripts/` folder, use only the standard library
 The importer reads it, so nobody has to look up IDs. Credentials come from `SNYK_TOKEN`, or from the `snyk auth` OAuth login if that's not set.
 
 The scripts import through a Snyk org's **existing** GitHub integration. They never create or change an integration: that's a Snyk admin task in Snyk > Settings > Integrations, plus installing the Snyk GitHub App on the GitHub org.
+
+## Onboarding mode: SCM import by default, CI only for cross-org dependencies
+`plan_table.py` picks one mode per repo and shows it in the **Onboarding** column:
+
+| Mode | When | Steps it gets |
+|---|---|---|
+| **SCM import** (default) | every repo, unless below | 4 import, 4b fix-PR settings, 5 PR, 5b merge gate |
+| **CI only** | `go.mod` requires a **private module from another GitHub org** (the Snyk SCM integration on this org can't read it, so the import would fail with "Unable to fetch private dependencies"), or `--ci-only` | **no** step 4 or 4b; 5 PR (`.snyk` + the Snyk caller with `go-private-owners` / `GO_MODULES_TOKEN`, scan + autofix) and 5b merge gate |
+
+A CI-only repo needs a Snyk org named like its GitHub owner (the CLI publishes there on `main`) but no SCM integration, and it needs a Snyk caller: an existing workflow calling the reusable workflows, or one step 5 can add (npm or Go). Otherwise it's *Stopped* at the plan. Its Snyk projects appear after the first CI run on the default branch (`snyk monitor`), not at onboarding. Fix PRs from Snyk's integration don't apply to it: the autofix job covers new dependency issues on PRs.
+
+`plan.json` records each repo's `mode` (`scm` or `ci-only`) and `mode_reason`; the next steps read it.
 
 ## Showing script output (every run, every step)
 Show what the scripts print the same way every time, so a run always looks like the last one:
@@ -182,7 +195,7 @@ If running `install_tools.sh` is refused, give the user the same command with `!
 With `--dry-run`, still run the setup check and report where it stops, but don't install anything or wait.
 
 ### 1. Detect (quiet)
-- **One or more repos, or `--file`:** run `python3 scripts/plan_table.py --repo <repos…> [--file <path>] [--snyk-org <slug>] --json <scratch>/plan.json`. It expands bare names to `brightsheets/<name>`, drops duplicates, detects each repo through the GitHub API and resolves its Snyk org (steps 1–3.1 at once). It prints nothing else; the full detection data goes to the `--json` file for later steps.
+- **One or more repos, or `--file`:** run `python3 scripts/plan_table.py --repo <repos…> [--file <path>] [--snyk-org <slug>] [--ci-only] --json <scratch>/plan.json`. It expands bare names to `brightsheets/<name>`, drops duplicates, detects each repo through the GitHub API and resolves its Snyk org (steps 1–3.1 at once). It prints nothing else; the full detection data goes to the `--json` file for later steps.
 - **Org:** `python3 scripts/scan_org.py --org <org> [--filter …] --out snyk-onboarding-plan-<org>.json`, then build the same table from it.
 
 It skips archived repos, repos where Snyk already runs in GitHub Actions, and repos with no supported stack, and lists them under *Skipped*. A repo whose detection or Snyk-org lookup fails is listed under *Stopped* (*Stop on failure: per repo*); the others go on.
@@ -210,8 +223,8 @@ Pass every entry in detection's `notes` on to the user. For example:
    - **No Snyk org with the owner's name:** show `snyk_import.py orgs` and tell the user to create a Snyk org named like the GitHub org (or pass `--snyk-org`). Don't import into a different org on your own. Offer to add the owner to `github_orgs` in `references/snyk-orgs.json`, then commit that change on its own so the next run resolves it.
    - **No GitHub integration in that org:** stop and say a Snyk admin must add one.
 2. If `references/snyk-orgs.json` is more than about 90 days old (`generated`), or an ID is rejected, run `refresh-orgs` and show the diff.
-3. Show `plan_table.py`'s output as-is in a plain code block: the drawn box (Repo, Branch, Products, Ecosystems, CI, Snyk org, **PR adds**, Notes), then *Skipped* / *Stopped*. **PR adds** says what step 5 will add to each repo: `.snyk`, `snyk.yml (js-snyk + autofix)` / `snyk.yml (go-snyk + autofix)`, both, or nothing. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
-4. **`--dry-run` stops here.** Otherwise ask for approval with AskUserQuestion. Nothing has been written yet. Say in the question that approving also (a) turns on Snyk's fix and upgrade PRs on each Snyk org's GitHub integration, for all its repos (unless `--no-settings`), (b) opens one PR per repo adding `.snyk` and, where no workflow calls the reusable workflows, a Snyk-only caller workflow `.github/workflows/snyk.yml` (unless `--no-pr`), and (c) adds the merge gate ruleset to each repo that uploads Snyk results to code scanning (unless `--no-gate`). PR checks are optional and get their own yes/no question in step 4b.
+3. Show `plan_table.py`'s output as-is in a plain code block: the drawn box (Repo, Branch, Products, Ecosystems, CI, Snyk org, **Onboarding**, **PR adds**, Notes), then the *CI only* line (each CI-only repo and why), *Skipped* / *Stopped*. **PR adds** says what step 5 will add to each repo: `.snyk`, `snyk.yml (js-snyk + autofix)` / `snyk.yml (go-snyk + autofix)`, both, or nothing. Nothing else. For an org, propose waves under it in one line: a pilot of about 10 repos, then the rest.
+4. **`--dry-run` stops here.** Otherwise ask for approval with AskUserQuestion. Nothing has been written yet. Say in the question which repos are **CI only** (not imported into Snyk; caller + merge gate only) and that approving also (a) turns on Snyk's fix and upgrade PRs on each Snyk org's GitHub integration, for all its repos (unless `--no-settings`), (b) opens one PR per repo adding `.snyk` and, where no workflow calls the reusable workflows, a Snyk-only caller workflow `.github/workflows/snyk.yml` (unless `--no-pr`), and (c) adds the merge gate ruleset to each repo that uploads Snyk results to code scanning (unless `--no-gate`). PR checks are optional and get their own yes/no question in step 4b.
 
 ### 4. Import into Snyk
 The importer does two things for each repo, in this order:
@@ -235,6 +248,8 @@ Every failure comes with recommendations. Examples:
 The run ends with a summary and the recommendations grouped by repo count. It exits non-zero if any repo failed.
 
 Show the importer's output as *Showing script output* says, for the dry run and the `--apply` run alike.
+
+**CI-only repos skip this step and 4b**: pass only the repos whose `mode` is `scm` to the importer.
 
 Steps:
 1. For each approved wave, run `snyk_import.py import (--repo <repo> [repo ...] | --file <path> | --plan …) [--org-id …] --skip-onboarded --chat` without `--apply`. (The `--apply` run adds `--log <scratch>/snyk-import-log.json`, which step 6 reads.) This dry run shows the GitHub App check, including the repos that *would be added* to the app, plus the imports, grouped by Snyk org.
@@ -265,12 +280,12 @@ With `--no-settings` or `--dry-run`, don't ask: run `--preset recommended` witho
 
 **Never edit or delete an existing workflow.** A repo that already calls the reusable workflows keeps its own; a `snyk.yml` that doesn't call them is left as is and reported.
 
-**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk` or the caller workflow, pushing the branch or opening the PR. Run it for each repo that imported fully. Repos stopped by a failure get no PR.
+**No extra approval.** The plan approval in step 3 covers this step: don't ask before adding `.snyk` or the caller workflow, pushing the branch or opening the PR. Run it for each repo that imported fully, **plus every CI-only repo** from the plan. Repos stopped by a failure get no PR.
 
 Run **one script** for all the fully imported repos. Don't write your own shell for this step: no hand-made clone, branch, `rm`, `set -e`, shell functions or loops.
 
 ```
-python3 scripts/snyk_pr.py --repo <fully imported repos…> --plan <scratch>/plan.json --apply --chat --log <scratch>/pr-log.json
+python3 scripts/snyk_pr.py --repo <fully imported repos… + CI-only repos…> --plan <scratch>/plan.json --apply --chat --log <scratch>/pr-log.json
 ```
 
 It does, per repo, the same way every run:
@@ -307,7 +322,7 @@ It's added only where it can work, and never changes an existing rule:
 **No extra approval.** The plan approval in step 3 covers it. Run one script for the fully imported repos, after step 5:
 
 ```
-python3 scripts/snyk_ruleset.py --repo <fully imported repos…> --pr-log <scratch>/pr-log.json --apply --chat --log <scratch>/ruleset-log.json
+python3 scripts/snyk_ruleset.py --repo <fully imported repos… + CI-only repos…> --pr-log <scratch>/pr-log.json --apply --chat --log <scratch>/ruleset-log.json
 ```
 
 It prints, per repo, the default branch and what uploads Snyk results, the ruleset it adds, then one line per repo: `✓ owner/repo | merge gate <url> | …`, `– owner/repo | skipped: <reason>` or `✗ owner/repo | failed: <error>`, and a summary. Show it as *Showing script output* says. A ✗ stops only that repo. Without `--apply` it only shows what it would do (with `--dry-run`).
@@ -318,13 +333,13 @@ After the block, say in one line that PRs into the default branch now can't merg
 End every run with the summary table, built from this run's logs:
 
 ```
-python3 scripts/summary_table.py --import-log <scratch>/snyk-import-log.json --pr-log <scratch>/pr-log.json --ruleset-log <scratch>/ruleset-log.json --settings <applied|unchanged|not-run|failed|shown>
+python3 scripts/summary_table.py --import-log <scratch>/snyk-import-log.json --pr-log <scratch>/pr-log.json --ruleset-log <scratch>/ruleset-log.json --plan <scratch>/plan.json --settings <applied|unchanged|not-run|failed|shown>
 ```
 
-`--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`, and `--ruleset-log` with `--no-gate`. Paste its output as-is inside a plain ```` ``` ```` code block: a drawn box with one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Merge gate, Result), the PR links under it, then `Done: n · Stopped: n · Skipped: n`. (`--markdown` prints a Markdown table instead, for the report file.) That table is the last thing the run shows, followed by one line with the report's path.
+`--settings` is what step 4b's output said: `applied` (it saved changes), `unchanged` ("Nothing to change"), `failed`, `shown` (`--no-settings` / read-only) or `not-run` (no repo imported fully). Leave out `--pr-log` with `--no-pr`, and `--ruleset-log` with `--no-gate`. `--plan` adds the CI-only repos (Import `— CI only`, Projects `from CI on main`); with only CI-only repos there's no import log, so leave out `--import-log`. Paste its output as-is inside a plain ```` ``` ```` code block: a drawn box with one row per repo (Repo, Import, Projects, PR checks & fix PRs, .snyk PR, Merge gate, Result), the PR links under it, then `Done: n · Stopped: n · Skipped: n`. (`--markdown` prints a Markdown table instead, for the report file.) That table is the last thing the run shows, followed by one line with the report's path.
 
 Write `snyk-onboarding-report-<org-or-repo>.md` with:
-- the repos imported, with their Snyk org
+- the repos imported, with their Snyk org, and the CI-only repos with the reason (e.g. the cross-org private modules) and the secrets their caller needs (`GO_MODULES_TOKEN`)
 - PR links, and whether each repo already calls the reusable workflows
 - the merge gate per repo: added (ruleset link), already gated, or skipped with the reason
 - skipped repos and stopped repos, with reasons: for a stopped repo, the step that failed and its error

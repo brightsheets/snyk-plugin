@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""Steps 1-3 in one quiet command: detect each repo's stack, resolve its Snyk org, and print the plan
-as one Markdown table (the standard display), then the skipped and stopped repos.
+"""Steps 1-3 in one quiet command: detect each repo's stack, resolve its Snyk org, pick the onboarding
+mode, and print the plan as one table (the standard display), then the skipped and stopped repos.
+
+Onboarding mode per repo:
+  scm      (default) import through the Snyk org's SCM integration, then the PR and the merge gate
+  ci-only  no SCM import: only the Snyk caller workflow (CLI scan + autofix) and the merge gate. Picked
+           automatically when go.mod needs private modules from another GitHub org (the SCM integration
+           can't read them), or for every repo with --ci-only.
 
   plan_table.py --repo test-snyk-demo/snyk-demo-go-1 [--repo …] [--file repos.txt] [--snyk-org <slug>]
                 [--json <path>]   # also save the full detection + resolve data for later steps
@@ -62,6 +68,7 @@ def main():
     ap.add_argument("--json", help="save detection + resolve results here")
     ap.add_argument("--markdown", action="store_true", help="print a Markdown table instead of the drawn box")
     ap.add_argument("--reusable", help="owner/repo of the shared reusable workflows (default: <repo owner>/reusable-workflows)")
+    ap.add_argument("--ci-only", action="store_true", help="onboard every repo without the SCM import (CI caller + merge gate only)")
     a = ap.parse_args()
 
     repos = si.split_repos(a.repo, a.file or [])
@@ -94,23 +101,39 @@ def main():
         d["resolve"] = {"snyk_org": org and org["slug"], "snyk_org_id": org and org["id"],
                         "integration_type": itype, "integration_id": iid, "reason": why}
         data.append(d)
-        if not iid:
+        pms = {p for e in (d.get("ecosystems") or {}).values() for p in e.get("package_managers") or []}
+        stack = "go" if "gomodules" in pms else "js" if "npm" in pms and "package-lock.json" in (d.get("manifest_files") or []) else None
+        owner, name = repo.split("/", 1)
+        xorg = si.go_cross_org_private(owner, name, d.get("branch")) if stack == "go" else []
+        if a.ci_only or xorg:
+            d["mode"] = "ci-only"
+            d["mode_reason"] = (f"go.mod needs private modules from another GitHub org ({', '.join(xorg)}), "
+                                "which the SCM integration can't read") if xorg else "--ci-only"
+        else:
+            d["mode"] = "scm"
+        if d["mode"] == "scm" and not iid:
             stopped.append((repo, "resolve", why)); continue
+        if d["mode"] == "ci-only" and not org:
+            stopped.append((repo, "resolve", why)); continue
+        has_ci = bool(sp.reusable_ci(repo))
+        if d["mode"] == "ci-only" and not has_ci and not (stack and sp.reusable_repo(owner, a.reusable)):
+            stopped.append((repo, "plan", "CI-only onboarding needs a Snyk caller, and there's no reusable Snyk workflow for this stack"))
+            continue
         adds = []
         if sp.gh_json("api", f"repos/{repo}/contents/.snyk") is None:
             adds.append(".snyk")
-        if not sp.reusable_ci(repo) and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
-            pms = {p for e in (d.get("ecosystems") or {}).values() for p in e.get("package_managers") or []}
-            stack = "go" if "gomodules" in pms else "js" if "npm" in pms and "package-lock.json" in (d.get("manifest_files") or []) else None
-            if stack and sp.reusable_repo(repo.split("/", 1)[0], a.reusable):
+        if not has_ci and sp.gh_json("api", f"repos/{repo}/contents/{sp.CALLER}") is None:
+            if stack and sp.reusable_repo(owner, a.reusable):
                 adds.append(f"snyk.yml ({stack}-snyk + autofix)")
         d["pr_adds"] = adds
+        mode = "SCM import" if d["mode"] == "scm" else "CI only (cross-org deps)" if xorg else "CI only"
         rows.append([repo, d["branch"], products(d), ecosystems(d),
                      ", ".join(label(c, CI) for c in d.get("ci_systems") or []) or "none",
-                     f"{org['slug']} ({label(itype, ITYPE)})", " + ".join(adds) or "nothing (has both)",
+                     f"{org['slug']} ({label(itype, ITYPE) if d['mode'] == 'scm' else 'CLI'})", mode,
+                     " + ".join(adds) or "nothing (has both)",
                      "; ".join(d.get("notes") or []) or "none"])
 
-    head = ["Repo", "Branch", "Products", "Ecosystems", "CI", "Snyk org", "PR adds", "Notes"]
+    head = ["Repo", "Branch", "Products", "Ecosystems", "CI", "Snyk org", "Onboarding", "PR adds", "Notes"]
     if rows and a.markdown:
         print("| " + " | ".join(head) + " |")
         print("|" + "|".join("---" for _ in head) + "|")
@@ -121,6 +144,10 @@ def main():
     else:
         print("No repos in the plan.")
     print()
+    ci_only = [d for d in data if d.get("mode") == "ci-only" and d["source"] in {r[0] for r in rows}]
+    if ci_only:
+        print("CI only (no SCM import; the caller scans with the Snyk CLI, the merge gate blocks): "
+              + "; ".join(f"{d['source']} ({d['mode_reason']})" for d in ci_only) + ".")
     print("Skipped: " + ("; ".join(f"{r} ({why})" for r, why in skipped) if skipped else "none") + ".")
     if stopped:
         print("Stopped: " + "; ".join(f"{r} ({step}: {why})" for r, step, why in stopped) + ".")
