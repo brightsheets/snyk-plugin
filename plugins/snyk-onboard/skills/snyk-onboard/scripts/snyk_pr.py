@@ -129,7 +129,7 @@ def caller_text(repo, dest, pms, d, reusable):
             "  security-events: write", "  pull-requests: write", "jobs:", "  snyk:"]
     common = ["      # Block PRs on high/critical findings; pushes stay report-only.",
               "      fail-on-issues: ${{ github.event_name == 'pull_request' }}",
-              "      # Publish the default branch to Snyk (PRs and feat* branches publish under their branch name).",
+              "      # Publish reports to Snyk from the default branch only; PRs scan, comment and gate without publishing.",
               "      monitor: ${{ github.ref_name == github.event.repository.default_branch }}"]
     if "gomodules" in pms:
         xorg = si.go_cross_org_private(owner, repo.split("/", 1)[1], d.get("branch"))
