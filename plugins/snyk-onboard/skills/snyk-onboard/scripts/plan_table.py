@@ -103,7 +103,7 @@ def main():
             pms = {p for e in (d.get("ecosystems") or {}).values() for p in e.get("package_managers") or []}
             stack = "go" if "gomodules" in pms else "js" if "npm" in pms and "package-lock.json" in (d.get("manifest_files") or []) else None
             if stack and sp.reusable_repo(repo.split("/", 1)[0], a.reusable):
-                adds.append(f"snyk.yml ({stack}-snyk)")
+                adds.append(f"snyk.yml ({stack}-snyk + autofix)" if stack == "js" else f"snyk.yml ({stack}-snyk)")
         d["pr_adds"] = adds
         rows.append([repo, d["branch"], products(d), ecosystems(d),
                      ", ".join(label(c, CI) for c in d.get("ci_systems") or []) or "none",

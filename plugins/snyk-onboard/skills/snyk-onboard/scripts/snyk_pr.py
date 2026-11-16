@@ -139,12 +139,22 @@ def caller_text(repo, dest, pms, d, reusable):
             node = (json.load(open(os.path.join(dest, "package.json"))).get("engines") or {}).get("node")
         except (OSError, ValueError):
             pass
-        lines = [f"# Snyk scan only: calls {reusable}/.github/workflows/js-snyk.yaml@v4 (Open Source + Code).",
-                 "# Needs secret SNYK_TOKEN."]
+        lines = [f"# Snyk scan: calls {reusable}/.github/workflows/js-snyk.yaml@v4 (Open Source + Code).",
+                 f"# On PRs, Snyk Autofix ({reusable}/.github/workflows/snyk-autofix.yaml@v8) then opens a fix PR",
+                 "# with Snyk's upgrades for the dependency issues the PR introduces.",
+                 "# Needs secret SNYK_TOKEN, and AUTOFIX_APP_TOKEN (contents, pull requests and issues: write)."]
         lines += head + [f"    uses: {reusable}/.github/workflows/js-snyk.yaml@v4", "    with:", f"      snyk-org: {owner}"]
         if node:
             lines.append(f'      node-version: "{node}"')
         lines += common + ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}"]
+        # Runs even when the scan's gate failed: that's exactly when there's something to fix.
+        lines += ["", "  autofix:", "    needs: snyk",
+                  "    if: ${{ !cancelled() && github.event_name == 'pull_request' && !startsWith(github.head_ref, 'snyk-autofix/') }}",
+                  "    permissions:", "      contents: write", "      pull-requests: write",
+                  f"    uses: {reusable}/.github/workflows/snyk-autofix.yaml@v8", "    with:", f"      snyk-org: {owner}"]
+        if node:
+            lines.append(f'      node-version: "{node}"')
+        lines += ["    secrets:", "      snyk-token: ${{ secrets.SNYK_TOKEN }}", "      app-token: ${{ secrets.AUTOFIX_APP_TOKEN }}"]
         return "\n".join(lines) + "\n"
     return None  # no Snyk reusable workflow for this stack
 
